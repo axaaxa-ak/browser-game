@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
+        canvas { display: block; background: #3a7d44; /* 草原っぽい色 */ }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="ui">HP: 100 / Score: 0</div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let player = { x: canvas.width/2, y: canvas.height/2, size: 20, color: "#00a2ff" };
+        let bullets = [];
+        let joystick = { active: false, startX: 0, startY: 0, currX: 0, currY: 0 };
+
+        // タッチ操作の設定
+        canvas.addEventListener("touchstart", (e) => {
+            const touch = e.touches[0];
+            // 画面左側なら移動ジョイスティック
+            if (touch.clientX < canvas.width / 2) {
+                joystick.active = true;
+                joystick.startX = touch.clientX;
+                joystick.startY = touch.clientY;
+            } else {
+                // 画面右側ならタップした方向に射撃
+                fireBullet(touch.clientX, touch.clientY);
+            }
+        });
+
+        canvas.addEventListener("touchmove", (e) => {
+            if (!joystick.active) return;
+            const touch = e.touches[0];
+            joystick.currX = touch.clientX;
+            joystick.currY = touch.clientY;
+            
+            // 移動計算
+            const dx = joystick.currX - joystick.startX;
+            const dy = joystick.currY - joystick.startY;
+            const angle = Math.atan2(dy, dx);
+            player.x += Math.cos(angle) * 3;
+            player.y += Math.sin(angle) * 3;
+        });
+
+        canvas.addEventListener("touchend", () => { joystick.active = false; });
+
+        function fireBullet(targetX, targetY) {
+            const angle = Math.atan2(targetY - player.y, targetX - player.x);
+            bullets.push({ x: player.x, y: player.y, angle: angle, speed: 7 });
+        }
+
+        function update() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // プレイヤー描画
+            ctx.fillStyle = player.color;
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.size, 0, Math.PI*2);
+            ctx.fill();
+
+            // 弾の更新と描画
+            bullets.forEach((b, i) => {
+                b.x += Math.cos(b.angle) * b.speed;
+                b.y += Math.sin(b.angle) * b.speed;
+                ctx.fillStyle = "yellow";
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, 5, 0, Math.PI*2);
+                ctx.fill();
+                // 画面外に出たら削除
+                if(b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) bullets.splice(i, 1);
+            });
+
+            requestAnimationFrame(update);
+        }
+        update();
+    </script>
+</body>
+</html>
