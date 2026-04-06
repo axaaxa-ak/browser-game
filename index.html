@@ -3,62 +3,107 @@
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
-        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
-        canvas { display: block; background: #3a7d44; /* 草原っぽい色 */ }
-        #ui { position: absolute; top: 10px; left: 10px; color: white; pointer-events: none; }
+        body { margin: 0; overflow: hidden; background: #222; touch-action: none; }
+        canvas { display: block; background: #3a7d44; }
     </style>
 </head>
 <body>
-    <div id="ui">HP: 100 / Score: 0</div>
     <canvas id="gameCanvas"></canvas>
 
     <script>
         const canvas = document.getElementById("gameCanvas");
         const ctx = canvas.getContext("2d");
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
 
         let player = { x: canvas.width/2, y: canvas.height/2, size: 20, color: "#00a2ff" };
         let bullets = [];
-        let joystick = { active: false, startX: 0, startY: 0, currX: 0, currY: 0 };
+        
+        // ジョイスティックの状態
+        let joystick = { 
+            active: false, 
+            baseX: 0, baseY: 0, // スティックの土台位置
+            currX: 0, currY: 0, // 指の位置
+            maxRadius: 50       // スティックが動く最大範囲
+        };
 
-        // タッチ操作の設定
+        // タッチイベント処理
         canvas.addEventListener("touchstart", (e) => {
-            const touch = e.touches[0];
-            // 画面左側なら移動ジョイスティック
-            if (touch.clientX < canvas.width / 2) {
-                joystick.active = true;
-                joystick.startX = touch.clientX;
-                joystick.startY = touch.clientY;
-            } else {
-                // 画面右側ならタップした方向に射撃
-                fireBullet(touch.clientX, touch.clientY);
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                let touch = e.changedTouches[i];
+                // 画面左側ならジョイスティック開始
+                if (touch.clientX < canvas.width / 2 && !joystick.active) {
+                    joystick.active = true;
+                    joystick.baseX = touch.clientX;
+                    joystick.baseY = touch.clientY;
+                    joystick.currX = touch.clientX;
+                    joystick.currY = touch.clientY;
+                    joystick.id = touch.identifier;
+                } else {
+                    // 画面右側なら射撃
+                    fireBullet(touch.clientX, touch.clientY);
+                }
             }
         });
 
         canvas.addEventListener("touchmove", (e) => {
-            if (!joystick.active) return;
-            const touch = e.touches[0];
-            joystick.currX = touch.clientX;
-            joystick.currY = touch.clientY;
-            
-            // 移動計算
-            const dx = joystick.currX - joystick.startX;
-            const dy = joystick.currY - joystick.startY;
-            const angle = Math.atan2(dy, dx);
-            player.x += Math.cos(angle) * 3;
-            player.y += Math.sin(angle) * 3;
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                let touch = e.changedTouches[i];
+                if (joystick.active && touch.identifier === joystick.id) {
+                    joystick.currX = touch.clientX;
+                    joystick.currY = touch.clientY;
+                }
+            }
         });
 
-        canvas.addEventListener("touchend", () => { joystick.active = false; });
+        canvas.addEventListener("touchend", (e) => {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                if (joystick.active && e.changedTouches[i].identifier === joystick.id) {
+                    joystick.active = false;
+                }
+            }
+        });
 
         function fireBullet(targetX, targetY) {
             const angle = Math.atan2(targetY - player.y, targetX - player.x);
-            bullets.push({ x: player.x, y: player.y, angle: angle, speed: 7 });
+            bullets.push({ x: player.x, y: player.y, angle: angle, speed: 10 });
         }
 
         function update() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // ジョイスティックによる移動計算
+            if (joystick.active) {
+                const dx = joystick.currX - joystick.baseX;
+                const dy = joystick.currY - joystick.baseY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const angle = Math.atan2(dy, dx);
+                
+                // スティックの傾き具合でスピード調整（最大3）
+                const speed = Math.min(distance / 10, 4);
+                player.x += Math.cos(angle) * speed;
+                player.y += Math.sin(angle) * speed;
+
+                // ジョイスティックの描画（土台）
+                ctx.beginPath();
+                ctx.arc(joystick.baseX, joystick.baseY, joystick.maxRadius, 0, Math.PI*2);
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+                ctx.lineWidth = 4;
+                ctx.stroke();
+
+                // ジョイスティックの描画（動く部分）
+                let stickX = joystick.baseX + Math.cos(angle) * Math.min(distance, joystick.maxRadius);
+                let stickY = joystick.baseY + Math.sin(angle) * Math.min(distance, joystick.maxRadius);
+                ctx.beginPath();
+                ctx.arc(stickX, stickY, 25, 0, Math.PI*2);
+                ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+                ctx.fill();
+            }
 
             // プレイヤー描画
             ctx.fillStyle = player.color;
@@ -66,7 +111,7 @@
             ctx.arc(player.x, player.y, player.size, 0, Math.PI*2);
             ctx.fill();
 
-            // 弾の更新と描画
+            // 弾の更新・描画
             bullets.forEach((b, i) => {
                 b.x += Math.cos(b.angle) * b.speed;
                 b.y += Math.sin(b.angle) * b.speed;
@@ -74,7 +119,6 @@
                 ctx.beginPath();
                 ctx.arc(b.x, b.y, 5, 0, Math.PI*2);
                 ctx.fill();
-                // 画面外に出たら削除
                 if(b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) bullets.splice(i, 1);
             });
 
