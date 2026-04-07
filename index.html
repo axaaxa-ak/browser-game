@@ -4,6 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Global Brawl</title>
+
 <style>
 
 body{
@@ -16,17 +17,15 @@ color:white;
 
 canvas{display:block}
 
-#ui{
+#menu{
 position:absolute;
-top:0;
-left:0;
 width:100%;
 height:100%;
-background:rgba(0,0,0,0.9);
+background:#000;
 display:flex;
 flex-direction:column;
-justify-content:center;
 align-items:center;
+justify-content:center;
 }
 
 #chars{
@@ -44,29 +43,21 @@ cursor:pointer;
 text-align:center;
 }
 
-.btn:hover
-
 #countdown{
 position:absolute;
 top:50%;
 left:50%;
 transform:translate(-50%,-50%);
-font-size:90px;
-font-weight:bold;
+font-size:80px;
 display:none;
 }
 
 #killLog{
 position:absolute;
-top:10px;
 right:10px;
+top:10px;
 width:220px;
 font-size:14px;
-}
-
-.kill{
-margin-bottom:4px;
-opacity:0.9;
 }
 
 #ultBtn{
@@ -83,12 +74,33 @@ justify-content:center;
 background:#111;
 }
 
+#stickBase{
+position:absolute;
+left:40px;
+bottom:40px;
+width:140px;
+height:140px;
+border-radius:50%;
+background:rgba(255,255,255,0.1);
+}
+
+#stick{
+position:absolute;
+left:70px;
+bottom:70px;
+width:80px;
+height:80px;
+border-radius:50%;
+background:rgba(255,255,255,0.3);
+}
+
 </style>
+
 </head>
 
 <body>
 
-<div id="ui">
+<div id="menu">
 <h1>GLOBAL BRAWL</h1>
 <div id="chars"></div>
 </div>
@@ -96,6 +108,9 @@ background:#111;
 <div id="countdown"></div>
 <div id="killLog"></div>
 <div id="ultBtn">ULT</div>
+
+<div id="stickBase"></div>
+<div id="stick"></div>
 
 <canvas id="game"></canvas>
 
@@ -107,29 +122,25 @@ const ctx=canvas.getContext("2d")
 canvas.width=innerWidth
 canvas.height=innerHeight
 
-const WORLD={w:1800,h:1800}
+const WORLD={w:1200,h:1200}
 
 let player
 let enemies=[]
 let bullets=[]
-let areas=[]
-let state="menu"
-
 let killLogs=[]
 
-const CHAR={
+let camX=0
+let camY=0
 
-soviet:{hp:8000,spd:2.5,size:60,col:"#c00"},
-usa:{hp:4500,spd:5,size:45,col:"#346"},
-uk:{hp:4000,spd:6.5,size:30,col:"#048"},
+let state="menu"
+
+const CHAR={
+soviet:{hp:8000,spd:2.5,size:55,col:"#c00"},
+usa:{hp:4500,spd:5,size:40,col:"#346"},
+uk:{hp:4000,spd:6,size:35,col:"#048"},
 france:{hp:5000,spd:4,size:40,col:"#e33"},
 germany:{hp:5500,spd:5,size:40,col:"#333"},
-japan:{hp:4500,spd:6.8,size:38,col:"#fff"},
-italy:{hp:5000,spd:4.2,size:40,col:"#094"},
-china:{hp:6000,spd:4,size:45,col:"#e12"},
-canada:{hp:6500,spd:3,size:50,col:"#f00"},
-finland:{hp:4800,spd:5,size:40,col:"#ccc"}
-
+japan:{hp:4500,spd:6.5,size:38,col:"#fff"}
 }
 
 class Actor{
@@ -146,30 +157,8 @@ this.maxHp=this.hp
 this.spd=CHAR[type].spd
 this.size=CHAR[type].size
 
-this.ammo=3
-this.reload=0
 this.ult=0
-
 this.dead=false
-
-}
-
-update(){
-
-if(this.dead)return
-
-if(this.ammo<3){
-
-this.reload++
-
-if(this.reload>80){
-
-this.ammo++
-this.reload=0
-
-}
-
-}
 
 }
 
@@ -178,17 +167,12 @@ draw(){
 if(this.dead)return
 
 ctx.beginPath()
-ctx.arc(this.x,this.y,this.size,0,Math.PI*2)
+ctx.arc(this.x-camX,this.y-camY,this.size,0,Math.PI*2)
 ctx.fillStyle=CHAR[this.type].col
 ctx.fill()
 
-let hpw=80
-
-ctx.fillStyle="#000"
-ctx.fillRect(this.x-40,this.y-this.size-20,hpw,6)
-
 ctx.fillStyle="#0f0"
-ctx.fillRect(this.x-40,this.y-this.size-20,hpw*(this.hp/this.maxHp),6)
+ctx.fillRect(this.x-40-camX,this.y-this.size-20-camY,80*(this.hp/this.maxHp),6)
 
 }
 
@@ -196,13 +180,12 @@ ctx.fillRect(this.x-40,this.y-this.size-20,hpw*(this.hp/this.maxHp),6)
 
 class Bullet{
 
-constructor(x,y,ang,spd,dmg,owner){
+constructor(x,y,ang,owner){
 
 this.x=x
 this.y=y
 this.ang=ang
-this.spd=spd
-this.dmg=dmg
+this.spd=14
 this.owner=owner
 this.life=120
 
@@ -227,18 +210,18 @@ let d=Math.hypot(this.x-t.x,this.y-t.y)
 
 if(d<t.size){
 
-t.hp-=this.dmg
+t.hp-=400
 this.dead=true
 
 if(t.hp<=0){
 
 t.dead=true
-addKillLog(this.owner.type,t.type)
+addKill(this.owner.type,t.type)
 
 }
 
 if(this.owner.team==="p")
-player.ult=Math.min(100,player.ult+5)
+player.ult=Math.min(100,player.ult+10)
 
 }
 
@@ -249,7 +232,7 @@ player.ult=Math.min(100,player.ult+5)
 draw(){
 
 ctx.beginPath()
-ctx.arc(this.x,this.y,8,0,Math.PI*2)
+ctx.arc(this.x-camX,this.y-camY,6,0,Math.PI*2)
 ctx.fillStyle="#fff"
 ctx.fill()
 
@@ -257,70 +240,100 @@ ctx.fill()
 
 }
 
-function addKillLog(a,b){
+function addKill(a,b){
 
-let log=a+" defeated "+b
-
-killLogs.unshift(log)
-
+killLogs.unshift(a+" defeated "+b)
 if(killLogs.length>6)killLogs.pop()
 
-renderKillLog()
-
-}
-
-function renderKillLog(){
-
-const div=document.getElementById("killLog")
+let div=document.getElementById("killLog")
 div.innerHTML=""
 
-killLogs.forEach(l=>{
-
+killLogs.forEach(k=>{
 let d=document.createElement("div")
-d.className="kill"
-d.innerText=l
+d.innerText=k
 div.appendChild(d)
-
 })
 
 }
 
 function fire(actor,ang){
 
-if(actor.ammo<=0)return
-
-bullets.push(
-new Bullet(actor.x,actor.y,ang,18,400,actor)
-)
-
-actor.ammo--
+bullets.push(new Bullet(actor.x,actor.y,ang,actor))
 
 }
 
 function useUlt(){
 
 if(player.ult<100)return
-
 player.ult=0
 
-for(let i=0;i<10;i++){
+for(let e of enemies){
 
-setTimeout(()=>{
+if(e.dead)continue
+e.hp-=1500
 
-areas.push({
-x:player.x+Math.random()*400-200,
-y:player.y+Math.random()*400-200,
-r:120,
-life:20
-})
-
-},i*120)
+if(e.hp<=0){
+e.dead=true
+addKill(player.type,e.type)
+}
 
 }
 
 }
 
-function drawUltGauge(){
+function ai(){
+
+for(let e of enemies){
+
+if(e.dead)continue
+
+let ang=Math.atan2(player.y-e.y,player.x-e.x)
+
+e.x+=Math.cos(ang)*e.spd*0.6
+e.y+=Math.sin(ang)*e.spd*0.6
+
+if(Math.random()<0.02)
+fire(e,ang)
+
+}
+
+}
+
+let moveX=0
+let moveY=0
+
+function update(){
+
+player.x+=moveX*player.spd
+player.y+=moveY*player.spd
+
+player.x=Math.max(0,Math.min(WORLD.w,player.x))
+player.y=Math.max(0,Math.min(WORLD.h,player.y))
+
+ai()
+
+bullets.forEach(b=>b.update())
+bullets=bullets.filter(b=>!b.dead)
+
+}
+
+function draw(){
+
+ctx.clearRect(0,0,canvas.width,canvas.height)
+
+camX=player.x-canvas.width/2
+camY=player.y-canvas.height/2
+
+player.draw()
+
+enemies.forEach(e=>e.draw())
+bullets.forEach(b=>b.draw())
+
+drawUlt()
+
+}
+
+function drawUlt(){
 
 let x=canvas.width-85
 let y=canvas.height-85
@@ -346,63 +359,11 @@ ctx.fillText("ULT",x,y+5)
 
 }
 
-function ai(){
-
-for(let e of enemies){
-
-if(e.dead)continue
-
-let ang=Math.atan2(player.y-e.y,player.x-e.x)
-
-e.x+=Math.cos(ang)*e.spd*0.6
-e.y+=Math.sin(ang)*e.spd*0.6
-
-if(Math.random()<0.02)fire(e,ang)
-
-}
-
-}
-
 function loop(){
 
-ctx.clearRect(0,0,canvas.width,canvas.height)
-
 if(state==="play"){
-
-player.update()
-ai()
-
-bullets.forEach(b=>b.update())
-bullets=bullets.filter(b=>!b.dead)
-
-player.draw()
-enemies.forEach(e=>e.draw())
-bullets.forEach(b=>b.draw())
-
-areas.forEach(a=>{
-
-ctx.beginPath()
-ctx.arc(a.x,a.y,a.r,0,Math.PI*2)
-ctx.fillStyle="rgba(255,255,255,0.2)"
-ctx.fill()
-
-a.life--
-
-if(a.life<0)a.dead=true
-
-})
-
-areas=areas.filter(a=>!a.dead)
-
-drawUltGauge()
-
-if(player.hp<=0 && !player.dead){
-
-player.dead=true
-document.getElementById("ui").style.display="flex"
-
-}
-
+update()
+draw()
 }
 
 requestAnimationFrame(loop)
@@ -411,7 +372,7 @@ requestAnimationFrame(loop)
 
 function start(type){
 
-document.getElementById("ui").style.display="none"
+document.getElementById("menu").style.display="none"
 
 const cd=document.getElementById("countdown")
 cd.style.display="block"
@@ -424,12 +385,10 @@ let timer=setInterval(()=>{
 t--
 
 if(t>0){
-
 cd.innerText=t
-
 }else{
 
-cd.innerText="START!"
+cd.innerText="START"
 
 clearInterval(timer)
 
@@ -441,8 +400,8 @@ player=new Actor(600,600,type,"p")
 
 enemies=[
 new Actor(900,700,"germany","e"),
-new Actor(1000,900,"soviet","e"),
-new Actor(800,1000,"usa","e")
+new Actor(800,900,"soviet","e"),
+new Actor(700,900,"usa","e")
 ]
 
 state="play"
@@ -465,7 +424,6 @@ for(let k in CHAR){
 let b=document.createElement("div")
 b.className="btn"
 b.innerText=k
-
 b.onclick=()=>start(k)
 
 div.appendChild(b)
@@ -474,17 +432,52 @@ div.appendChild(b)
 
 }
 
-addEventListener("mousedown",e=>{
+canvas.addEventListener("mousedown",e=>{
 
-if(state!=="play")return
-
-let ang=Math.atan2(e.clientY-player.y,e.clientX-player.x)
-
+let ang=Math.atan2(e.clientY-canvas.height/2,e.clientX-canvas.width/2)
 fire(player,ang)
 
 })
 
 document.getElementById("ultBtn").onclick=useUlt
+
+/* 仮想スティック */
+
+let stick=document.getElementById("stick")
+let base=document.getElementById("stickBase")
+
+base.addEventListener("touchmove",e=>{
+
+let t=e.touches[0]
+
+let rect=base.getBoundingClientRect()
+
+let x=t.clientX-(rect.left+70)
+let y=t.clientY-(rect.top+70)
+
+let d=Math.hypot(x,y)
+
+if(d>60){
+
+x*=60/d
+y*=60/d
+
+}
+
+stick.style.transform=`translate(${x}px,${y}px)`
+
+moveX=x/60
+moveY=y/60
+
+})
+
+base.addEventListener("touchend",()=>{
+
+stick.style.transform="translate(0px,0px)"
+moveX=0
+moveY=0
+
+})
 
 createMenu()
 
