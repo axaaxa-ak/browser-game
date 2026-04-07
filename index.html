@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Global Brawl - Pro v2.2 Fixed</title>
+    <title>Global Brawl - Pro v2.3 Ultimate</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; touch-action: none; font-family: 'Arial', sans-serif; user-select: none; }
         canvas { display: block; }
@@ -15,8 +15,8 @@
 </head>
 <body>
     <div id="ui">
-        <h1 style="color:#ffcc00;">GLOBAL BRAWL : PRO v2.2</h1>
-        <p>仕様修正・リロード・自然回復 完備</p>
+        <h1 style="color:#ffcc00;">GLOBAL BRAWL : PRO v2.3</h1>
+        <p>全要素統合・完全修正版</p>
         <div class="grid" id="chars"></div>
     </div>
     <canvas id="canvas"></canvas>
@@ -30,16 +30,16 @@
         let hitStop = 0;
 
         const C = {
-            soviet:  { hp: 8000, spd: 2.8, size: 60, col: "#c00", sym: "★", range: 450, break: true },
-            usa:     { hp: 4500, spd: 5.5, size: 45, col: "#336", sym: "USA", range: 750, break: true },
-            uk:      { hp: 4000, spd: 6.5, size: 25, col: "#027", sym: "UK", range: 900, break: false },
-            france:  { hp: 5000, spd: 4.0, size: 35, col: "#e23", sym: "FR", range: 300, break: false },
-            germany: { hp: 5500, spd: 5.5, size: 35, col: "#333", sym: "✠", range: 600, break: true },
-            japan:   { hp: 4500, spd: 6.8, size: 35, col: "#fff", sym: "☉", range: 400, break: false },
-            italy:   { hp: 5000, spd: 4.2, size: 35, col: "#094", sym: "🍕", range: 250, break: false },
-            china:   { hp: 6000, spd: 4.0, size: 45, col: "#e12", sym: "五", range: 600, break: false },
-            canada:  { hp: 6500, spd: 2.5, size: 45, col: "#f00", sym: "🍁", range: 700, break: false },
-            finland: { hp: 4800, spd: 5.5, size: 35, col: "#038", sym: "❄", range: 1200, break: false }
+            soviet:  { hp: 8000, spd: 2.8, size: 60, col: "#c00", sym: "★", range: 450, type: "combo", break: true },
+            usa:     { hp: 4500, spd: 5.5, size: 45, col: "#336", sym: "USA", range: 750, type: "rapid", break: true },
+            uk:      { hp: 4000, spd: 6.5, size: 25, col: "#027", sym: "UK", range: 900, type: "snipe", break: false },
+            france:  { hp: 5000, spd: 4.0, size: 35, col: "#e23", sym: "FR", range: 300, type: "wall", break: false },
+            germany: { hp: 5500, spd: 5.5, size: 35, col: "#333", sym: "✠", range: 600, type: "tank", break: true },
+            japan:   { hp: 4500, spd: 6.8, size: 35, col: "#fff", sym: "☉", range: 400, type: "dash", break: false },
+            italy:   { hp: 5000, spd: 4.2, size: 35, col: "#094", sym: "🍕", range: 250, type: "melee", break: false },
+            china:   { hp: 6000, spd: 4.0, size: 45, col: "#e12", sym: "五", range: 600, type: "stars", break: false },
+            canada:  { hp: 6500, spd: 2.5, size: 45, col: "#f00", sym: "🍁", range: 700, type: "slow", break: false },
+            finland: { hp: 4800, spd: 5.5, size: 35, col: "#038", sym: "❄", range: 1200, type: "snipe", break: false }
         };
 
         function init() {
@@ -54,7 +54,12 @@
         function start(type) {
             document.getElementById("ui").classList.add("hidden");
             player = new Actor(500, 2000, 'p', type);
-            enemies = [new Actor(3000, 2000, 'e', 'germany'), new Actor(3500, 1500, 'e', 'uk')];
+            // 敵を再配置
+            enemies = [
+                new Actor(1500, 1800, 'e', 'soviet'),
+                new Actor(1500, 2200, 'e', 'japan'),
+                new Actor(2500, 2000, 'e', 'finland')
+            ];
             walls = [new Wall(1000, 1000, 100, 2000, false), new Wall(2000, 1500, 100, 1000, true)];
             state = 'play'; resize(); loop();
         }
@@ -71,24 +76,32 @@
             constructor(x,y,team,type) {
                 this.x=x; this.y=y; this.team=team; this.type=type;
                 let b=C[type]; this.hp=b.hp; this.maxHp=b.hp; this.spd=b.spd; this.size=b.size;
-                this.ammo=3; this.reload=0; this.lastHit=0; this.flash=0; this.dead=false;
+                this.ammo=3; this.reload=0; this.lastHit=Date.now(); this.flash=0; this.dead=false;
+                this.step=0; // コンボ用
             }
             update(mvAng, isMv) {
                 if(this.dead) return;
                 if(this.flash > 0) this.flash--;
                 
-                // 自然回復: 3秒(180F)ダメージなしで回復
+                // 自然回復（3秒間ダメージなし）
                 if(Date.now() - this.lastHit > 3000 && this.hp < this.maxHp) {
-                    this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.001);
+                    this.hp = Math.min(this.maxHp, this.hp + 5);
                 }
 
-                // リロード処理
+                // リロード
                 if(this.ammo < 3) {
                     this.reload++;
                     if(this.reload > 90) { this.ammo++; this.reload = 0; }
                 }
 
-                if(this.team==='e') { /* AIロジック(略) */ }
+                // AI（簡易版：敵を追尾し、射程で攻撃）
+                if(this.team==='e') {
+                    let d = Math.hypot(player.x-this.x, player.y-this.y);
+                    let a = Math.atan2(player.y-this.y, player.x-this.x);
+                    if(d > C[this.type].range * 0.8) { mvAng = a; isMv = true; }
+                    else if(d < C[this.type].range * 0.5) { mvAng = a + Math.PI; isMv = true; }
+                    else { isMv = false; if(Math.random() < 0.02 && this.ammo > 0) fire(this, a); }
+                }
 
                 if(isMv) {
                     let nx=this.x+Math.cos(mvAng)*this.spd; let ny=this.y+Math.sin(mvAng)*this.spd;
@@ -101,48 +114,61 @@
             }
             draw() {
                 if(this.dead) return;
-                // リロードインジケーター（足元）
-                if(this.ammo < 3) {
-                    ctx.beginPath(); ctx.arc(this.x, this.y, this.size+10, -Math.PI/2, -Math.PI/2 + (Math.PI*2 * (this.reload/90)));
-                    ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth=4; ctx.stroke();
-                }
-                // 本体
                 ctx.save(); ctx.translate(this.x,this.y);
                 ctx.beginPath(); ctx.arc(0,0,this.size,0,Math.PI*2);
                 ctx.fillStyle=this.flash>0?"#fff":C[this.type].col; ctx.fill();
                 ctx.strokeStyle=this.team==='p'?"#0ff":"#f00"; ctx.lineWidth=3; ctx.stroke();
                 ctx.fillStyle="#fff"; ctx.font="bold 20px Arial"; ctx.textAlign="center"; ctx.fillText(C[this.type].sym,0,7);
                 ctx.restore();
+
                 // HPバー
-                ctx.fillStyle="#000"; ctx.fillRect(this.x-30,this.y-this.size-15,60,6);
-                ctx.fillStyle=this.hp > this.maxHp*0.3 ? "#0f0":"#f00"; ctx.fillRect(this.x-30,this.y-this.size-15,60*(this.hp/this.maxHp),6);
+                let bx = this.x-40, by = this.y-this.size-20;
+                ctx.fillStyle="#333"; ctx.fillRect(bx, by, 80, 8);
+                ctx.fillStyle=this.team==='p'?"#0f0":"#f00"; ctx.fillRect(bx, by, 80*(this.hp/this.maxHp), 8);
+                
+                // リロードバー（HPバーの下）
+                if(this.ammo < 3) {
+                    ctx.fillStyle="#555"; ctx.fillRect(bx, by+10, 80, 4);
+                    ctx.fillStyle="#fff"; ctx.fillRect(bx, by+10, 80*(this.reload/90), 4);
+                }
             }
         }
 
         class Entity {
-            constructor(x,y,ang,spd,rng,dmg,owner,canBreak) { 
-                this.x=x; this.y=y; this.sx=x; this.sy=y; this.ang=ang; this.spd=spd; this.rng=rng; this.dmg=dmg; this.owner=owner; this.canBreak=canBreak; this.active=true; 
+            constructor(x,y,ang,spd,rng,dmg,owner,canBreak,size=8) { 
+                this.x=x; this.y=y; this.sx=x; this.sy=y; this.ang=ang; this.spd=spd; this.rng=rng; this.dmg=dmg; this.owner=owner; this.canBreak=canBreak; this.size=size; this.active=true; 
             }
             update() {
                 this.x+=Math.cos(this.ang)*this.spd; this.y+=Math.sin(this.ang)*this.spd;
                 if(Math.hypot(this.x-this.sx,this.y-this.sy)>this.rng) this.active=false;
-                
                 let tgts=this.owner.team==='p'?enemies:[player];
-                for(let t of tgts) if(!t.dead && Math.hypot(this.x-t.x,this.y-t.y)<t.size+10){
+                for(let t of tgts) if(!t.dead && Math.hypot(this.x-t.x,this.y-t.y)<t.size+this.size){
                     t.hp-=this.dmg; t.flash=5; t.lastHit=Date.now();
-                    if(this.owner.team==='p') { cam.shake=10; hitStop=2; }
-                    this.active=false;
-                    if(t.hp<=0) t.dead=true;
+                    if(this.owner.team==='p') { cam.shake=15; hitStop=3; }
+                    this.active=false; if(t.hp<=0) t.dead=true;
                 }
                 for(let w of walls) if(w.hp>0 && this.x>w.x && this.x<w.x+w.w && this.y>w.y && this.y<w.y+w.h){
-                    if(this.canBreak && w.brk) w.hp-=this.dmg; 
-                    this.active=false; 
+                    if(this.canBreak && w.brk) w.hp-=this.dmg; this.active=false; 
                 }
             }
-            draw() { ctx.fillStyle="#fff"; ctx.fillRect(this.x-4,this.y-4,8,8); }
+            draw() { ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(this.x,this.y,this.size,0,Math.PI*2); ctx.fill(); }
         }
 
-        // --- 入力系 ---
+        function fire(act, ang) {
+            if(act.ammo <= 0) return;
+            const b = C[act.type];
+            // 攻撃の差別化
+            if(b.type === "combo") { // ソビエト: 段階的に弾が大きくなる
+                act.step = (act.step % 3) + 1;
+                entities.push(new Entity(act.x, act.y, ang, 15, b.range, 400*act.step, act, b.break, 10*act.step));
+            } else if(b.type === "rapid") { // アメリカ: 弾速が速い
+                entities.push(new Entity(act.x, act.y, ang, 30, b.range, 500, act, b.break, 5));
+            } else { // その他汎用
+                entities.push(new Entity(act.x, act.y, ang, 20, b.range, 800, act, b.break, 8));
+            }
+            act.ammo--; act.reload = 0;
+        }
+
         let sticks = { m:{a:false,bx:0,by:0,cx:0,cy:0,id:null}, a:{a:false,bx:0,by:0,cx:0,cy:0,id:null} };
         canvas.addEventListener("touchstart", e => {
             for(let t of e.changedTouches) {
@@ -158,11 +184,7 @@
         canvas.addEventListener("touchend", e => {
             for(let t of e.changedTouches) {
                 for(let k in sticks) if(sticks[k].id===t.identifier) {
-                    if(k==='a' && player.ammo>0) {
-                        let ang=Math.atan2(sticks.a.cy-sticks.a.by, sticks.a.cx-sticks.a.bx);
-                        entities.push(new Entity(player.x, player.y, ang, 20, C[player.type].range, 800, player, C[player.type].break));
-                        player.ammo--;
-                    }
+                    if(k==='a') fire(player, Math.atan2(sticks.a.cy-sticks.a.by, sticks.a.cx-sticks.a.bx));
                     sticks[k].a=false; sticks[k].id=null;
                 }
             }
@@ -174,15 +196,14 @@
                 ctx.clearRect(0,0,canvas.width,canvas.height);
                 cam.x += (player.x - cam.x)*0.1; cam.y += (player.y - cam.y)*0.1;
                 let sx=(Math.random()-0.5)*cam.shake; let sy=(Math.random()-0.5)*cam.shake; cam.shake*=0.8;
-
                 ctx.save(); ctx.translate(canvas.width/2-cam.x+sx, canvas.height/2-cam.y+sy);
                 ctx.fillStyle="#111"; ctx.fillRect(0,0,WORLD.w,WORLD.h);
                 
                 player.update(Math.atan2(sticks.m.cy-sticks.m.by, sticks.m.cx-sticks.m.bx), sticks.m.a);
+                enemies.forEach(e=>e.update()); enemies = enemies.filter(e => !e.dead || Date.now() - e.lastHit < 5000);
                 entities.forEach(e=>e.update()); entities=entities.filter(e=>e.active);
                 walls.forEach(w=>w.draw());
                 
-                // エイムガイド
                 if(sticks.a.a) {
                     let ang=Math.atan2(sticks.a.cy-sticks.a.by, sticks.a.cx-sticks.a.bx);
                     ctx.strokeStyle="rgba(255,255,255,0.3)"; ctx.setLineDash([5,5]);
@@ -193,7 +214,6 @@
 
                 player.draw(); enemies.forEach(e=>e.draw()); entities.forEach(e=>e.draw());
                 ctx.restore();
-                
                 drawStick(120, canvas.height-120, sticks.m, "#fff");
                 drawStick(canvas.width-120, canvas.height-120, sticks.a, "#ff0");
             }
