@@ -1,262 +1,1127 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Global Brawl - Pro Edition</title>
-    <style>
-        body { margin: 0; overflow: hidden; background: #000; touch-action: none; font-family: 'Arial', sans-serif; user-select: none; }
-        canvas { display: block; }
-        #ui { position: absolute; top:0; left:0; width:100%; height:100%; display:flex; justify-content:center; align-items:center; background:rgba(0,0,0,0.9); flex-direction:column; z-index:10; color:#fff;}
-        .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 20px; }
-        .btn { padding: 15px; background: #222; border: 2px solid #555; cursor: pointer; text-align: center; border-radius: 8px; color:white; font-size: 11px;}
-        #respawnUI { position: absolute; top:0; left:0; width:100%; height:100%; display:none; justify-content:center; align-items:center; background:rgba(200,0,0,0.4); z-index:20; color:#fff; flex-direction:column; }
-        .hidden { display: none !important; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Global Brawl: Pro Edition</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#000;overflow:hidden;touch-action:none;font-family:Arial,sans-serif;user-select:none;}
+canvas{display:block;}
+#homeUI{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20;color:#fff;overflow-y:auto;padding:20px;}
+#homeUI h1{color:#ffcc00;font-size:26px;margin-bottom:6px;}
+#homeUI p{color:#aaa;font-size:13px;margin-bottom:14px;}
+.char-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;max-width:600px;width:100%;}
+.char-btn{padding:10px 4px;background:#1a1a1a;border:2px solid #444;border-radius:8px;cursor:pointer;text-align:center;color:#fff;font-size:10px;transition:border-color 0.2s;}
+.char-btn:hover{border-color:#ffcc00;background:#2a2a1a;}
+.char-btn .sym{font-size:18px;display:block;margin-bottom:3px;}
+.char-btn .nm{font-weight:bold;font-size:11px;}
+.char-btn .st{font-size:9px;color:#888;margin-top:2px;}
+.char-btn .sp{font-size:9px;color:#a0a;margin-top:1px;}
+#gameOverUI{position:absolute;top:0;left:0;width:100%;height:100%;display:none;justify-content:center;align-items:center;background:rgba(0,0,0,0.65);z-index:30;flex-direction:column;color:#fff;}
+#gameOverUI h2{font-size:48px;color:#f44;}
+#winUI{position:absolute;top:0;left:0;width:100%;height:100%;display:none;justify-content:center;align-items:center;background:rgba(0,0,0,0.65);z-index:30;flex-direction:column;color:#fff;}
+#winUI h2{font-size:48px;color:#ffcc00;}
+.restart-btn{margin-top:18px;padding:12px 32px;font-size:16px;cursor:pointer;background:#ffcc00;border:none;border-radius:8px;color:#000;font-weight:bold;}
+.hidden{display:none!important;}
+</style>
 </head>
 <body>
-    <div id="ui">
-        <h1 style="color:#ffcc00;">GLOBAL BRAWL: PRO</h1>
-        <div class="grid" id="chars"></div>
-    </div>
+<div id="homeUI">
+  <h1>★ GLOBAL BRAWL: PRO ★</h1>
+  <p>キャラクターを選択 — 味方2体(AI)と共に敵チーム3体と戦う 3vs3</p>
+  <div class="char-grid" id="charGrid"></div>
+</div>
+<div id="gameOverUI">
+  <h2>DEFEATED</h2>
+  <p id="respawnMsg">リスポーン中...</p>
+</div>
+<div id="winUI">
+  <h2>VICTORY!</h2>
+  <p>敵チームを全滅させた！</p>
+  <button class="restart-btn" onclick="location.reload()">もう一度</button>
+</div>
+<canvas id="canvas"></canvas>
+<script>
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+const WORLD={w:5000,h:5000};
+const TEAM={P:0,A:1,E:2};
 
-    <div id="respawnUI">
-        <h2 style="font-size:48px;">DEFEATED</h2>
-        <p id="respawnTimer">Respawning in 3...</p>
-    </div>
+const CHARS={
+  soviet:{name:'ソビエト',sym:'★',col:'#c00',outline:'#ff8888',size:58,spd:1.8,baseHp:9000,maxAmmo:1,reloadTime:120,special:'赤い津波',spMax:4000},
+  usa:{name:'アメリカ',sym:'A',col:'#3a5f8a',outline:'#88aadd',size:48,spd:4.5,baseHp:5500,maxAmmo:3,reloadTime:80,special:'正義の空爆',spMax:3500},
+  uk:{name:'イギリス',sym:'K',col:'#012169',outline:'#6688cc',size:28,spd:6.5,baseHp:4200,maxAmmo:3,reloadTime:100,special:'英海峡',spMax:2500},
+  france:{name:'フランス',sym:'F',col:'#002395',outline:'#6677ee',size:38,spd:3.2,baseHp:5200,maxAmmo:3,reloadTime:90,special:'白旗',spMax:3000},
+  germany:{name:'ドイツ',sym:'G',col:'#555',outline:'#999',size:38,spd:4.8,baseHp:5800,maxAmmo:3,reloadTime:110,special:'電撃戦',spMax:3000},
+  japan:{name:'日本',sym:'J',col:'#ddd',outline:'#ff4444',size:36,spd:6.8,baseHp:4600,maxAmmo:2,reloadTime:70,special:'大和魂',spMax:2500},
+  italy:{name:'イタリア',sym:'I',col:'#009246',outline:'#66cc88',size:38,spd:3.5,baseHp:5300,maxAmmo:1,reloadTime:400,special:'美食家',spMax:3000},
+  china:{name:'中国',sym:'C',col:'#DE2910',outline:'#ff8866',size:46,spd:3.2,baseHp:6200,maxAmmo:3,reloadTime:85,special:'ゲリラ戦',spMax:2800},
+  canada:{name:'カナダ',sym:'M',col:'#c00',outline:'#ff8888',size:46,spd:2.2,baseHp:7000,maxAmmo:3,reloadTime:95,special:'シロップの海',spMax:3500},
+  finland:{name:'フィンランド',sym:'S',col:'#003580',outline:'#6699cc',size:36,spd:4.8,baseHp:5000,maxAmmo:3,reloadTime:110,special:'白い死神',spMax:2800}
+};
+const CKEYS=Object.keys(CHARS);
 
-    <canvas id="canvas"></canvas>
+let state='home';
+let player=null, allies=[], enemies=[];
+let projectiles=[], areas=[], items=[];
+let walls=[];
+let cam={x:2500,y:2500};
+let frameCount=0;
+let gameResult=null;
 
-    <script>
-        const canvas = document.getElementById("canvas");
-        const ctx = canvas.getContext("2d");
-        const WORLD = { w: 4000, h: 4000 };
-        let state = 'home', player, enemies = [], walls = [], entities = [], areas = [];
-        let cam = { x: 0, y: 0 };
+// スティック
+const stk={
+  mv:{a:false,bx:0,by:0,cx:0,cy:0,id:null},
+  at:{a:false,bx:0,by:0,cx:0,cy:0,id:null},
+  sp:{a:false,bx:0,by:0,cx:0,cy:0,id:null}
+};
+const keys={};
 
-        const C = {
-            soviet:  { hp: 8000, spd: 3, size: 55, col: "#c00", sym: "★", dmg: 700 },
-            usa:     { hp: 4500, spd: 5, size: 45, col: "#336", sym: "USA", dmg: 400 },
-            uk:      { hp: 4000, spd: 6, size: 30, col: "#027", sym: "UK", dmg: 900 },
-            france:  { hp: 5000, spd: 4, size: 40, col: "#e23", sym: "FR", dmg: 600 },
-            germany: { hp: 5500, spd: 5, size: 40, col: "#333", sym: "✠", dmg: 500 },
-            japan:   { hp: 4500, spd: 6.5, size: 35, col: "#fff", sym: "☉", dmg: 1000 },
-            italy:   { hp: 5000, spd: 4.5, size: 35, col: "#094", sym: "🍕", dmg: 550 },
-            china:   { hp: 6000, spd: 4, size: 45, col: "#e12", sym: "五", dmg: 450 },
-            canada:  { hp: 6500, spd: 3, size: 45, col: "#f00", sym: "🍁", dmg: 500 },
-            finland: { hp: 4800, spd: 5.5, size: 35, col: "#038", sym: "❄", dmg: 1200 }
-        };
+function resize(){canvas.width=innerWidth;canvas.height=innerHeight;}
+window.addEventListener('resize',resize);resize();
 
-        function init() {
-            const grid = document.getElementById("chars");
-            Object.keys(C).forEach(k => {
-                let b = document.createElement("div"); b.className = "btn";
-                b.innerHTML = `<b>${C[k].sym}</b><br>${k}`;
-                b.onclick = () => start(k); grid.appendChild(b);
-            });
+// --- MAP ---
+function buildMap(){
+  walls=[];
+  const W=WORLD.w,H=WORLD.h;
+  // 境界（破壊不可）
+  const bd=[
+    {x:0,y:0,w:W,h:30},{x:0,y:H-30,w:W,h:30},
+    {x:0,y:0,w:30,h:H},{x:W-30,y:0,w:30,h:H}
+  ];
+  bd.forEach(s=>walls.push({...s,brk:false,hp:Infinity,maxHp:Infinity}));
+  // 固定壁（破壊不可）
+  const solid=[
+    {x:1700,y:1700,w:80,h:700},{x:3220,y:1700,w:80,h:700},
+    {x:1700,y:2700,w:80,h:700},{x:3220,y:2700,w:80,h:700},
+    {x:2100,y:1300,w:800,h:80},{x:2100,y:3620,w:800,h:80},
+    {x:2350,y:2350,w:300,h:300},
+    {x:1200,y:1200,w:60,h:300},{x:3740,y:3500,w:60,h:300},
+    {x:1200,y:3500,w:300,h:60},{x:3500,y:1200,w:300,h:60},
+  ];
+  solid.forEach(s=>walls.push({...s,brk:false,hp:Infinity,maxHp:Infinity}));
+  // 破壊可能壁（弾すり抜け）
+  const brk=[
+    {x:1300,y:2100,w:60,h:500},{x:3640,y:2100,w:60,h:500},
+    {x:2000,y:1600,w:500,h:60},{x:2000,y:3340,w:500,h:60},
+    {x:2550,y:1950,w:60,h:350},{x:2390,y:2700,w:350,h:60},
+    {x:1500,y:1500,w:60,h:200},{x:3440,y:3300,w:60,h:200},
+    {x:2900,y:1400,w:200,h:60},{x:1400,y:3540,w:200,h:60},
+    {x:2000,y:2480,w:200,h:60},{x:2800,y:2480,w:200,h:60},
+    {x:1800,y:3000,w:60,h:200},{x:3140,y:1800,w:60,h:200},
+  ];
+  brk.forEach(s=>walls.push({...s,brk:true,hp:2000,maxHp:2000}));
+}
+
+function wallAtSolid(nx,ny,sz){
+  for(let w of walls){
+    if(w.hp<=0) continue;
+    if(!w.brk&&nx+sz>w.x&&nx-sz<w.x+w.w&&ny+sz>w.y&&ny-sz<w.y+w.h) return true;
+  }
+  return false;
+}
+function ptInWall(x,y,w){return x>w.x&&x<w.x+w.w&&y>w.y&&y<w.y+w.h;}
+function rcOverlap(w,cx,cy,r){
+  const nx=Math.max(w.x,Math.min(cx,w.x+w.w));
+  const ny=Math.max(w.y,Math.min(cy,w.y+w.h));
+  return (cx-nx)**2+(cy-ny)**2<r*r;
+}
+function dst(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
+function dst2(ax,ay,bx,by){return (ax-bx)**2+(ay-by)**2;}
+function shuffle(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}}
+
+function foes(actor){
+  if(!actor) return [];
+  if(actor.team===TEAM.E) return [player,...allies].filter(a=>a&&!a.dead);
+  return enemies.filter(a=>!a.dead);
+}
+function friends(actor){
+  if(!actor) return [];
+  if(actor.team===TEAM.E) return enemies.filter(a=>!a.dead);
+  return [player,...allies].filter(a=>a&&!a.dead);
+}
+
+// --- Actor ---
+class Actor{
+  constructor(x,y,team,type){
+    this.x=x;this.y=y;this.team=team;this.type=type;
+    const c=CHARS[type];
+    this.hp=c.baseHp;this.maxHp=c.baseHp;
+    this.spd=c.spd;this.size=c.size;
+    this.dead=false;this.respawnT=0;
+    this.atkPhase=0;this.atkCD=0;
+    this.ammo=c.maxAmmo;this.maxAmmo=c.maxAmmo;
+    this.reloadT=0;this.reloadTime=c.reloadTime;
+    this.spGauge=0;this.spMax=c.spMax;
+    this.spActive=false;this.spTimer=0;
+    this.atkMult=1;this.spdMult=1;this.reloadMult=1;
+    this.state=null;
+    this.slowF=1;this.invisible=false;
+    this.inTank=false;this.tankHp=0;
+    this.yamato=false;
+    this.blizzard=false;
+    this.aiT=0;
+    this.hitFlash=0;
+    this.name=c.name;
+  }
+
+  get spd2(){return this.spd*this.spdMult*this.slowF;}
+
+  addSP(v){this.spGauge=Math.min(this.spMax,this.spGauge+v);}
+
+  takeDmg(dmg,src){
+    if(this.dead) return;
+    // 白旗デバフ
+    let m=1;
+    for(let a of areas){
+      if(a.type==='wflag'&&a.owner&&a.owner.team!==this.team&&dst(this,a)<a.radius) m*=0.75;
+    }
+    const d=dmg*m;
+    if(this.inTank){
+      this.tankHp-=d;
+      if(this.tankHp<=0) this.exitTank(true);
+      return;
+    }
+    this.hp-=d;this.hitFlash=6;
+    if(src) src.addSP(d*0.4);
+    if(this.hp<=0){this.hp=0;this.die();}
+  }
+
+  die(){
+    this.dead=true;
+    let rt=5000;
+    if(this.yamato&&this.team===TEAM.P) rt=3000;
+    this.respawnT=rt;
+    this.state=null;this.inTank=false;this.yamato=false;this.blizzard=false;
+    this.atkMult=1;this.spdMult=1;this.reloadMult=1;this.invisible=false;
+    if(this.team===TEAM.P){
+      document.getElementById('gameOverUI').style.display='flex';
+      let s=Math.ceil(rt/1000);
+      document.getElementById('respawnMsg').textContent=`${s}秒後にリスポーン...`;
+      const iv=setInterval(()=>{
+        s--;
+        if(s<=0){clearInterval(iv);return;}
+        document.getElementById('respawnMsg').textContent=`${s}秒後にリスポーン...`;
+      },1000);
+    }
+    checkEnd();
+  }
+
+  respawn(){
+    const c=CHARS[this.type];
+    this.hp=c.baseHp;this.maxHp=c.baseHp;
+    this.dead=false;this.respawnT=0;
+    this.atkPhase=0;this.atkCD=0;
+    this.ammo=c.maxAmmo;this.reloadT=0;
+    this.spGauge=0;this.state=null;
+    this.slowF=1;this.invisible=false;
+    this.atkMult=1;this.spdMult=1;this.reloadMult=1;
+    this.inTank=false;this.yamato=false;this.blizzard=false;
+    if(this.team===TEAM.P||this.team===TEAM.A){
+      this.x=600+Math.random()*300;this.y=2100+Math.random()*800;
+    } else {
+      this.x=4100+Math.random()*300;this.y=2100+Math.random()*800;
+    }
+    if(this.team===TEAM.P) document.getElementById('gameOverUI').style.display='none';
+  }
+
+  exitTank(exp){
+    this.inTank=false;
+    this.size=CHARS[this.type].size;
+    this.spd=CHARS[this.type].spd;
+    if(exp){
+      areas.push(new Area(this.x,this.y,'expl',this,160,900,18));
+      this.state={t:'stun',f:70};
+    }
+  }
+
+  move(ax,ay){
+    if(this.dead) return;
+    if(this.state&&(this.state.t==='stun'||this.state.t==='jp_charge')) return;
+    const spd=this.spd2;
+    let nx=this.x+ax*spd, ny=this.y+ay*spd;
+    nx=Math.max(this.size+32,Math.min(WORLD.w-this.size-32,nx));
+    ny=Math.max(this.size+32,Math.min(WORLD.h-this.size-32,ny));
+    if(!wallAtSolid(nx,this.y,this.size)) this.x=nx;
+    if(!wallAtSolid(this.x,ny,this.size)) this.y=ny;
+  }
+
+  atk(ang){
+    if(this.dead||this.atkCD>0) return;
+    const t=this.type;
+    if(t==='soviet') this.sovAtk(ang);
+    else if(t==='usa') this.usaAtk(ang);
+    else if(t==='uk') this.ukAtk(ang);
+    else if(t==='france') this.fraAtk(ang);
+    else if(t==='germany'){if(this.inTank)this.tankAtk(ang);else this.gerAtk(ang);}
+    else if(t==='japan') this.jpAtk(ang);
+    else if(t==='italy') this.itaAtk(ang);
+    else if(t==='china') this.chiAtk(ang);
+    else if(t==='canada') this.canAtk(ang);
+    else if(t==='finland'){if(this.blizzard)this.finSMG(ang);else this.finSnipe(ang);}
+  }
+
+  sovAtk(ang){
+    const ph=this.atkPhase%3;
+    if(ph===0){
+      areas.push(new Area(this.x+Math.cos(ang)*130,this.y+Math.sin(ang)*130,'shock',this,200,700,14,ang));
+      this.atkCD=55;
+    } else if(ph===1){
+      areas.push(new Area(this.x,this.y,'slash',this,160,800,12,ang));
+      this.atkCD=48;
+    } else {
+      projectiles.push(new Boomerang(this.x,this.y,ang,9,700,900*this.atkMult,this));
+      this.atkCD=85;
+    }
+    this.atkPhase++;
+  }
+
+  usaAtk(ang){
+    if(this.ammo<=0) return;
+    for(let i=0;i<5;i++){
+      const a=ang+(i-2)*0.09;
+      projectiles.push(new Bullet(this.x,this.y,a,19,1100,320*this.atkMult,this));
+    }
+    this.ammo--;this.atkCD=22;
+  }
+
+  ukAtk(ang){
+    if(this.ammo<=0) return;
+    projectiles.push(new Bullet(this.x,this.y,ang,22,1300,2000*this.atkMult,this,10));
+    this.ammo--;this.atkCD=45;
+  }
+
+  fraAtk(ang){
+    const tx=this.x+Math.cos(ang)*130,ty=this.y+Math.sin(ang)*130;
+    const perp=ang+Math.PI/2;
+    const tw=Math.abs(Math.cos(perp))<0.5?220:60;
+    const th=Math.abs(Math.cos(perp))<0.5?60:220;
+    walls.push({x:tx-tw/2,y:ty-th/2,w:tw,h:th,brk:true,hp:1600,maxHp:1600,isTrench:true});
+    areas.push(new Area(tx,ty,'slash',this,90,550,10,ang));
+    this.atkCD=60;
+  }
+
+  gerAtk(ang){
+    if(this.ammo<=0) return;
+    const n=15;
+    for(let i=0;i<n;i++){
+      setTimeout(()=>{
+        if(this.dead) return;
+        const sp=(Math.random()-0.5)*0.55;
+        projectiles.push(new FadeBullet(this.x,this.y,ang+sp,17,650,210*this.atkMult,this));
+      },i*38);
+    }
+    this.ammo--;this.atkCD=105;
+  }
+
+  tankAtk(ang){
+    if(this.ammo<=0) return;
+    projectiles.push(new ExpBullet(this.x,this.y,ang,13,950,1600*this.atkMult,this,160));
+    this.ammo--;this.atkCD=90;this.addSP(500);
+  }
+
+  jpAtk(ang){
+    const ph=this.atkPhase%2;
+    if(ph===0){
+      this.state={t:'jp_charge',f:18,ang};this.atkCD=12;
+    } else {
+      areas.push(new Area(this.x,this.y,'slash',this,220,900*this.atkMult,14,ang));
+      projectiles.push(new Bullet(this.x,this.y,ang,15,550,700*this.atkMult,this));
+      this.atkCD=55;
+    }
+    this.atkPhase++;
+  }
+
+  itaAtk(ang){
+    if(this.ammo<=0) return;
+    areas.push(new Area(this.x,this.y,'pizza',this,85,450*this.atkMult,300,ang,this));
+    this.ammo--;this.atkCD=28;
+  }
+
+  chiAtk(ang){
+    if(this.state&&this.state.t==='chi_ch') return;
+    this.state={t:'chi_ch',f:28,ang};this.atkCD=85;
+  }
+
+  canAtk(ang){
+    if(this.ammo<=0) return;
+    const tx=this.x+Math.cos(ang)*480,ty=this.y+Math.sin(ang)*480;
+    areas.push(new Area(tx,ty,'maple',this,85,210*this.atkMult,300,ang));
+    this.ammo--;this.atkCD=75;
+  }
+
+  finSnipe(ang){
+    if(this.ammo<=0) return;
+    projectiles.push(new Bullet(this.x,this.y,ang,30,2200,2400*this.atkMult,this,10));
+    this.ammo--;this.atkCD=100;
+  }
+
+  finSMG(ang){
+    if(this.ammo<=0) return;
+    for(let i=0;i<20;i++){
+      setTimeout(()=>{
+        if(this.dead) return;
+        const sp=(Math.random()-0.5)*0.85;
+        projectiles.push(new Bullet(this.x,this.y,ang+sp,15,320,160*this.atkMult,this));
+      },i*45);
+    }
+    this.ammo--;this.atkCD=85;
+  }
+
+  special(ang){
+    if(this.dead||this.spGauge<this.spMax) return;
+    this.spGauge=0;
+    const t=this.type;
+    if(t==='soviet') this.spSov();
+    else if(t==='usa') this.spUSA(ang);
+    else if(t==='uk') this.spUK();
+    else if(t==='france') this.spFra(ang);
+    else if(t==='germany'){if(this.inTank)this.spTank(ang);else this.spGer();}
+    else if(t==='japan') this.spJP();
+    else if(t==='italy') this.spIta();
+    else if(t==='china') this.spChi();
+    else if(t==='canada') this.spCan(ang);
+    else if(t==='finland') this.spFin(ang);
+  }
+
+  spSov(){
+    // bot5体召喚
+    const foesArr=foes(this);
+    const target=foesArr[0]||null;
+    for(let i=0;i<5;i++){
+      const bx=this.x+(Math.random()-0.5)*200,by=this.y+(Math.random()-0.5)*200;
+      const bot=new Bot(bx,by,this.team,'ak_bot',target);
+      if(this.team===TEAM.E) enemies.push(bot);
+      else allies.push(bot);
+    }
+  }
+
+  spUSA(ang){
+    const tx=this.x+Math.cos(ang)*700,ty=this.y+Math.sin(ang)*700;
+    areas.push(new Area(tx,ty,'strike_mk',this,260,0,90,ang));
+    setTimeout(()=>{
+      for(let i=0;i<14;i++){
+        const ox=(Math.random()-0.5)*320,oy=(Math.random()-0.5)*320;
+        const ax=tx+ox,ay=ty+oy;
+        areas.push(new Area(ax,ay,'expl',this,140,1400,18));
+        for(let w of walls){if(w.brk&&w.hp>0&&rcOverlap(w,ax,ay,140)) w.hp-=1200;}
+      }
+    },1500);
+  }
+
+  spUK(){areas.push(new Area(this.x,this.y,'channel',this,210,700,240));}
+
+  spFra(ang){
+    const tx=this.x+Math.cos(ang)*320,ty=this.y+Math.sin(ang)*320;
+    areas.push(new Area(tx,ty,'wflag',this,260,0,480,ang));
+  }
+
+  spGer(){
+    this.inTank=true;
+    this.tankHp=this.hp*1.5;
+    this.size=66;this.spd=CHARS['germany'].spd*0.8;
+    this.spTimer=900;
+  }
+
+  spTank(ang){
+    const tx=this.x+Math.cos(ang)*550,ty=this.y+Math.sin(ang)*550;
+    areas.push(new Area(tx,ty,'strike_mk',this,200,0,72,ang));
+    setTimeout(()=>{
+      for(let i=0;i<7;i++){
+        const ox=(Math.random()-0.5)*220,oy=(Math.random()-0.5)*220;
+        const ax=tx+ox,ay=ty+oy;
+        areas.push(new Area(ax,ay,'expl',this,150,2000,18));
+        for(let w of walls){if(w.brk&&w.hp>0&&rcOverlap(w,ax,ay,150)) w.hp-=1500;}
+      }
+    },1200);
+  }
+
+  spJP(){
+    this.yamato=true;
+    this.atkMult=1.5;this.spdMult=1.65;this.reloadMult=1.5;
+    this.spTimer=300;
+  }
+
+  spIta(){
+    for(let i=0;i<4;i++){
+      const a=i*Math.PI/2;
+      items.push(new HealItem(this.x+Math.cos(a)*160,this.y+Math.sin(a)*160,this.team,900));
+    }
+  }
+
+  spChi(){
+    this.invisible=true;
+    this.spTimer=180;
+  }
+
+  spCan(ang){
+    for(let i=0;i<10;i++){
+      const a=i*Math.PI*2/10;
+      areas.push(new Area(this.x+Math.cos(a)*200,this.y+Math.sin(a)*200,'syrup',this,130,120,480));
+    }
+  }
+
+  spFin(ang){
+    this.blizzard=true;
+    areas.push(new Area(this.x,this.y,'bliz',this,550,120,600,0,this));
+    this.spTimer=600;
+  }
+
+  update(){
+    if(this.dead){
+      this.respawnT-=16.67;
+      if(this.respawnT<=0) this.respawn();
+      return;
+    }
+    // stateマシン
+    if(this.state){
+      if(this.state.t==='stun'){
+        this.state.f--;
+        if(this.state.f<=0) this.state=null;
+      } else if(this.state.t==='jp_charge'){
+        this.state.f--;
+        const a=this.state.ang;
+        let nx=this.x+Math.cos(a)*15,ny=this.y+Math.sin(a)*15;
+        nx=Math.max(this.size+32,Math.min(WORLD.w-this.size-32,nx));
+        ny=Math.max(this.size+32,Math.min(WORLD.h-this.size-32,ny));
+        if(!wallAtSolid(nx,this.y,this.size)) this.x=nx;
+        if(!wallAtSolid(this.x,ny,this.size)) this.y=ny;
+        if(this.state.f<=0){
+          areas.push(new Area(this.x,this.y,'slash',this,110,750*this.atkMult,10,a));
+          this.state=null;
         }
-
-        function start(type) {
-            document.getElementById("ui").classList.add("hidden");
-            spawnPlayer(type);
-            enemies = [new Actor(1500, 1800, 'e', 'usa'), new Actor(1500, 2200, 'e', 'germany'), new Actor(2000, 2000, 'e', 'soviet')];
-            walls = [new Wall(1000, 1000, 100, 2000, false), new Wall(2000, 1500, 100, 1000, true)];
-            state = 'play'; resize(); loop();
+      } else if(this.state.t==='chi_ch'){
+        this.state.f--;
+        if(this.state.f<=0){
+          const a=this.state.ang;
+          for(let i=0;i<5;i++){
+            const da=ang_=>(ang_+(i-2)*0.16);
+            projectiles.push(new Bullet(this.x,this.y,da(a),16,750,550*this.atkMult,this));
+          }
+          this.state=null;
         }
+      }
+    }
+    // バフタイマー
+    if(this.spTimer>0){
+      this.spTimer--;
+      if(this.spTimer<=0){
+        if(this.inTank) this.exitTank(false);
+        if(this.yamato){this.yamato=false;this.atkMult=1;this.spdMult=1;this.reloadMult=1;}
+        if(this.invisible) this.invisible=false;
+        if(this.blizzard) this.blizzard=false;
+      }
+    }
+    // リロード
+    if(this.ammo<this.maxAmmo){
+      this.reloadT++;
+      if(this.reloadT>=this.reloadTime/this.reloadMult){this.ammo++;this.reloadT=0;}
+    }
+    if(this.atkCD>0) this.atkCD--;
+    if(this.hitFlash>0) this.hitFlash--;
+    // スロー解除
+    if(this.slowF<1){
+      let inS=false;
+      for(let a of areas){
+        if((a.type==='syrup'||a.type==='bliz')&&a.owner&&a.owner.team!==this.team&&dst(this,a)<a.radius){inS=true;break;}
+      }
+      if(!inS) this.slowF=1;
+    }
+    // アイテム取得
+    for(let it of items){
+      if(!it.active||it.team!==this.team) continue;
+      if(dst(this,it)<it.radius+this.size) it.apply(this);
+    }
+  }
 
-        function spawnPlayer(type) {
-            player = new Actor(500, 2000, 'p', type);
-            cam.x = player.x; cam.y = player.y;
-            document.getElementById("respawnUI").style.display = "none";
+  drawSelf(){
+    if(this.dead) return;
+    if(this.invisible&&this.team===TEAM.E) return;
+    // 吹雪内 敵から味方不可視
+    if(this.team!==TEAM.E){
+      for(let a of areas){
+        if(a.type==='bliz'&&a.owner&&a.owner.team===TEAM.E&&dst(this,a)<a.radius) return;
+      }
+    }
+    ctx.save();
+    ctx.translate(this.x,this.y);
+    // ヒットフラッシュ
+    if(this.hitFlash>0){
+      ctx.globalAlpha=0.5+0.5*(this.hitFlash%2);
+    }
+    // 戦車
+    if(this.inTank){
+      ctx.fillStyle='#666';
+      ctx.beginPath();ctx.ellipse(0,0,this.size+14,this.size+10,0,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle='#999';ctx.lineWidth=3;ctx.stroke();
+    }
+    // 本体
+    ctx.beginPath();ctx.arc(0,0,this.size,0,Math.PI*2);
+    ctx.fillStyle=this.invisible?`rgba(180,180,180,0.25)`:CHARS[this.type].col;
+    ctx.fill();
+    ctx.strokeStyle=this.team===TEAM.P?'#0ff':this.team===TEAM.A?'#0f0':'#f44';
+    ctx.lineWidth=3;ctx.stroke();
+    // シンボル
+    ctx.fillStyle=this.hitFlash>0?'#f88':'#fff';
+    ctx.font=`bold ${Math.max(11,Math.floor(this.size*0.5))}px Arial`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(CHARS[this.type].sym,0,0);
+    ctx.restore();
+
+    // HP・ゲージ
+    const bw=80,bx=this.x-bw/2,by=this.y-this.size-38;
+    ctx.fillStyle='#000';ctx.fillRect(bx,by,bw,8);
+    const hr=this.hp/this.maxHp;
+    ctx.fillStyle=hr>0.5?'#2ecc71':hr>0.25?'#f39c12':'#e74c3c';
+    ctx.fillRect(bx,by,bw*hr,8);
+    ctx.fillStyle='#fff';ctx.font='9px Arial';ctx.textAlign='center';
+    ctx.fillText(`${Math.ceil(this.hp)}`,this.x,by+6);
+    // 弾薬
+    for(let i=0;i<this.maxAmmo;i++){
+      const sw=bw/this.maxAmmo-2,sx=bx+i*(bw/this.maxAmmo);
+      ctx.fillStyle=i<this.ammo?'#f1c40f':'#333';
+      ctx.fillRect(sx,by+10,sw,5);
+      if(i===this.ammo&&this.ammo<this.maxAmmo){
+        ctx.fillStyle='#aaa';
+        ctx.fillRect(sx,by+10,sw*(this.reloadT/(this.reloadTime/this.reloadMult)),5);
+      }
+    }
+    // SP（プレイヤーのみ画面UIで表示、ここでは全員に小さく）
+    ctx.fillStyle='#333';ctx.fillRect(bx,by+17,bw,3);
+    ctx.fillStyle='#a855f7';ctx.fillRect(bx,by+17,bw*(this.spGauge/this.spMax),3);
+    // 名前
+    ctx.fillStyle='#ddd';ctx.font='10px Arial';ctx.textAlign='center';
+    ctx.fillText(CHARS[this.type].name,this.x,by-4);
+  }
+
+  aiUpdate(){
+    if(this.dead) return;
+    this.aiT++;
+    const foesArr=foes(this).filter(f=>!f.dead);
+    if(!foesArr.length) return;
+    let near=null,nd=Infinity;
+    for(let f of foesArr){const d=dst(this,f);if(d<nd){nd=d;near=f;}}
+    const ang=Math.atan2(near.y-this.y,near.x-this.x);
+    // 弾回避
+    let dodge=null;
+    for(let p of projectiles){
+      if(p.owner&&p.owner.team===this.team) continue;
+      if(dst({x:p.x,y:p.y},this)<200){
+        dodge=ang+Math.PI/2*(Math.random()>0.5?1:-1);break;
+      }
+    }
+    if(dodge!==null) this.move(Math.cos(dodge),Math.sin(dodge));
+    else if(nd>280) this.move(Math.cos(ang),Math.sin(ang));
+    else if(nd<120) this.move(-Math.cos(ang),-Math.sin(ang));
+    else {
+      // 横移動でウィーブ
+      if(this.aiT%40<20) this.move(Math.cos(ang+Math.PI/2),Math.sin(ang+Math.PI/2));
+      else this.move(Math.cos(ang-Math.PI/2),Math.sin(ang-Math.PI/2));
+    }
+    if(this.aiT%28===0&&nd<900) this.atk(ang);
+    if(this.spGauge>=this.spMax) this.special(ang);
+  }
+}
+
+// Bot（ソビエト特殊用）
+class Bot extends Actor{
+  constructor(x,y,team,type,target){
+    super(x,y,team,'usa');
+    this.botTarget=target;
+    this.hp=700;this.maxHp=700;this.size=16;this.spd=3.8;
+    this.isBot=true;this.ammo=99;this.maxAmmo=3;
+  }
+  aiUpdate(){
+    if(this.dead||!this.botTarget) return;
+    const ang=Math.atan2(this.botTarget.y-this.y,this.botTarget.x-this.x);
+    const d=dst(this,this.botTarget);
+    if(d>55) this.move(Math.cos(ang),Math.sin(ang));
+    this.aiT++;
+    if(this.aiT%42===0&&d<650){
+      projectiles.push(new Bullet(this.x,this.y,ang,15,550,160,this));
+    }
+  }
+}
+
+// --- Projectiles ---
+class Bullet{
+  constructor(x,y,ang,spd,range,dmg,owner,r=7){
+    this.x=x;this.y=y;this.sx=x;this.sy=y;
+    this.ang=ang;this.spd=spd;this.range=range;this.dmg=dmg;
+    this.owner=owner;this.active=true;this.r=r;
+  }
+  update(){
+    this.x+=Math.cos(this.ang)*this.spd;
+    this.y+=Math.sin(this.ang)*this.spd;
+    if(dst2(this.x,this.y,this.sx,this.sy)>this.range**2){this.active=false;return;}
+    // 破壊不可壁のみ当たる
+    for(let w of walls){
+      if(w.hp<=0||w.brk) continue;
+      if(ptInWall(this.x,this.y,w)){this.active=false;return;}
+    }
+    const fs=foes(this.owner);
+    for(let f of fs){
+      if(!f.dead&&dst2(this.x,this.y,f.x,f.y)<(f.size+this.r)**2){
+        f.takeDmg(this.dmg,this.owner);this.active=false;return;
+      }
+    }
+  }
+  draw(){
+    ctx.fillStyle='#ffe040';
+    ctx.beginPath();ctx.arc(this.x,this.y,this.r,0,Math.PI*2);ctx.fill();
+  }
+}
+
+class FadeBullet extends Bullet{
+  update(){
+    this.x+=Math.cos(this.ang)*this.spd;
+    this.y+=Math.sin(this.ang)*this.spd;
+    if(dst2(this.x,this.y,this.sx,this.sy)>this.range**2){this.active=false;return;}
+    for(let w of walls){if(w.hp<=0||w.brk) continue;if(ptInWall(this.x,this.y,w)){this.active=false;return;}}
+    const ratio=Math.sqrt(dst2(this.x,this.y,this.sx,this.sy))/this.range;
+    const d=this.dmg*(1-ratio*0.65);
+    const fs=foes(this.owner);
+    for(let f of fs){
+      if(!f.dead&&dst2(this.x,this.y,f.x,f.y)<(f.size+this.r)**2){
+        f.takeDmg(d,this.owner);this.active=false;return;
+      }
+    }
+  }
+}
+
+class ExpBullet extends Bullet{
+  constructor(x,y,ang,spd,range,dmg,owner,er){super(x,y,ang,spd,range,dmg,owner);this.er=er;}
+  update(){
+    this.x+=Math.cos(this.ang)*this.spd;
+    this.y+=Math.sin(this.ang)*this.spd;
+    let hit=false;
+    if(dst2(this.x,this.y,this.sx,this.sy)>this.range**2) hit=true;
+    for(let w of walls){if(w.hp>0&&ptInWall(this.x,this.y,w)){hit=true;if(w.brk) w.hp-=1500;break;}}
+    const fs=foes(this.owner);
+    for(let f of fs){if(!f.dead&&dst2(this.x,this.y,f.x,f.y)<(f.size+this.r)**2){hit=true;break;}}
+    if(hit){
+      areas.push(new Area(this.x,this.y,'expl',this.owner,this.er,this.dmg*0.8,18));
+      for(let w of walls){if(w.brk&&w.hp>0&&rcOverlap(w,this.x,this.y,this.er)) w.hp-=1200;}
+      this.active=false;
+    }
+  }
+  draw(){
+    ctx.fillStyle='#ff8800';ctx.beginPath();ctx.arc(this.x,this.y,10,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#ffcc00';ctx.lineWidth=2;ctx.stroke();
+  }
+}
+
+class Boomerang extends Bullet{
+  constructor(x,y,ang,spd,range,dmg,owner){super(x,y,ang,spd,range,dmg,owner,10);this.ret=false;this.hs=new Set();}
+  update(){
+    if(!this.ret){
+      this.x+=Math.cos(this.ang)*this.spd;this.y+=Math.sin(this.ang)*this.spd;
+      if(dst2(this.x,this.y,this.sx,this.sy)>this.range**2) this.ret=true;
+    } else {
+      const a=Math.atan2(this.owner.y-this.y,this.owner.x-this.x);
+      this.x+=Math.cos(a)*this.spd;this.y+=Math.sin(a)*this.spd;
+      if(dst2(this.x,this.y,this.owner.x,this.owner.y)<35**2){
+        this.owner.atkPhase=Math.floor(this.owner.atkPhase/3)*3;
+        this.active=false;return;
+      }
+    }
+    const fs=foes(this.owner);
+    for(let f of fs){
+      if(!f.dead&&!this.hs.has(f)&&dst2(this.x,this.y,f.x,f.y)<(f.size+this.r)**2){
+        f.takeDmg(this.dmg,this.owner);this.hs.add(f);
+      }
+    }
+  }
+  draw(){
+    ctx.save();ctx.translate(this.x,this.y);ctx.rotate(frameCount*0.25);
+    ctx.fillStyle='#ccc';ctx.font='bold 20px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('C',0,0);ctx.restore();
+  }
+}
+
+// --- Area ---
+class Area{
+  constructor(x,y,type,owner,radius,dmg,dur,ang,ref){
+    this.x=x;this.y=y;this.type=type;this.owner=owner;
+    this.radius=radius;this.dmg=dmg;this.dur=dur;
+    this.ang=ang||0;this.ref=ref;
+    this.f=0;this.active=true;this.hs=new Set();
+    this.follow=(type==='pizza'||type==='channel'||type==='bliz');
+  }
+  update(){
+    this.f++;
+    if(this.f>this.dur){this.active=false;return;}
+    if(this.follow&&this.owner){
+      if(this.owner.dead){this.active=false;return;}
+      this.x=this.owner.x;this.y=this.owner.y;
+    }
+    const t=this.type;
+    const fs=foes(this.owner);
+    if(t==='shock'||t==='expl'){
+      for(let f of fs){
+        if(!f.dead&&!this.hs.has(f)&&dst(this,f)<this.radius+f.size){
+          f.takeDmg(this.dmg,this.owner);this.hs.add(f);
         }
-
-        function handleDeath() {
-            document.getElementById("respawnUI").style.display = "flex";
-            let sec = 3;
-            const timer = setInterval(() => {
-                sec--;
-                document.getElementById("respawnTimer").innerText = `Respawning in ${sec}...`;
-                if(sec <= 0) {
-                    clearInterval(timer);
-                    spawnPlayer(player.type);
-                }
-            }, 1000);
+      }
+    } else if(t==='slash'){
+      for(let f of fs){
+        if(!f.dead&&!this.hs.has(f)){
+          const a=Math.atan2(f.y-this.y,f.x-this.x);
+          const da=Math.abs(((a-this.ang+Math.PI*3)%(Math.PI*2))-Math.PI);
+          if(dst(this,f)<this.radius+f.size&&da<Math.PI/2){
+            f.takeDmg(this.dmg,this.owner);this.hs.add(f);
+          }
         }
-
-        window.addEventListener('resize', resize);
-        function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
-
-        class Wall {
-            constructor(x,y,w,h,brk,hp=2000) { this.x=x; this.y=y; this.w=w; this.h=h; this.brk=brk; this.hp=hp; }
-            draw() { if(this.hp<=0) return; ctx.fillStyle = this.brk ? "#8b4513" : "#555"; ctx.fillRect(this.x, this.y, this.w, this.h); }
+      }
+    } else if(t==='pizza'){
+      if(this.f%15===0){
+        for(let f of fs){
+          if(!f.dead&&dst(this,f)<this.radius+f.size) f.takeDmg(this.dmg,this.owner);
         }
-
-        class Actor {
-            constructor(x,y,team,type) {
-                this.x=x; this.y=y; this.team=team; this.type=type;
-                this.hp=C[type].hp; this.maxHp=this.hp; this.spd=C[type].spd; this.size=C[type].size;
-                this.ammo=3; this.reloadProgress=0; this.reloadTime=100;
-                this.dead=false; this.state=null;
-            }
-            update(mvAng, isMv) {
-                if(this.dead) return;
-                if(this.ammo < 3) {
-                    this.reloadProgress++;
-                    if(this.reloadProgress >= this.reloadTime) { this.ammo++; this.reloadProgress = 0; }
-                }
-                if(this.state && this.state.t === 'jp_dash') {
-                    this.x += Math.cos(this.state.ang)*30; this.y += Math.sin(this.state.ang)*30;
-                    if(Date.now() > this.state.end) {
-                        areas.push(new Area(this.x, this.y, 'slash', this, this.state.ang, 200, 1200));
-                        this.state = null;
-                    }
-                    return;
-                }
-                if(isMv) {
-                    let nx=this.x+Math.cos(mvAng)*this.spd; let ny=this.y+Math.sin(mvAng)*this.spd;
-                    if(!this.colWall(nx,this.y)) this.x=nx; if(!this.colWall(this.x,ny)) this.y=ny;
-                }
-            }
-            colWall(nx,ny) {
-                for(let w of walls) if(w.hp>0 && nx+this.size*0.5 > w.x && nx-this.size*0.5 < w.x+w.w && ny+this.size*0.5 > w.y && ny-this.size*0.5 < w.y+w.h) return true;
-                return false;
-            }
-            draw() {
-                if(this.dead) return;
-                ctx.save(); ctx.translate(this.x,this.y);
-                ctx.beginPath(); ctx.arc(0,0,this.size,0,Math.PI*2);
-                ctx.fillStyle=C[this.type].col; ctx.fill();
-                ctx.strokeStyle=this.team==='p'?"#0ff":"#f00"; ctx.lineWidth=3; ctx.stroke();
-                ctx.fillStyle="#fff"; ctx.font="bold 18px Arial"; ctx.textAlign="center"; ctx.fillText(C[this.type].sym,0,7);
-                ctx.restore();
-
-                let bx=this.x-40, by=this.y-this.size-25;
-                ctx.fillStyle="#000"; ctx.fillRect(bx,by,80,8);
-                ctx.fillStyle=this.team==='p'?"#2ecc71":"#e74c3c"; ctx.fillRect(bx,by,80*(this.hp/this.maxHp),8);
-                if(this.team==='p') {
-                    for(let i=0; i<3; i++) {
-                        let sx = bx + (i * 28);
-                        ctx.fillStyle = (this.ammo > i) ? "#f1c40f" : "#444";
-                        ctx.fillRect(sx, by+10, 24, 6);
-                        if(this.ammo === i) ctx.fillRect(sx, by+10, 24 * (this.reloadProgress/this.reloadTime), 6);
-                    }
-                }
-            }
+      }
+    } else if(t==='channel'){
+      // 弾消し
+      for(let p of projectiles){
+        if(p.owner&&p.owner.team===this.owner.team) continue;
+        if(dst({x:p.x,y:p.y},this)<this.radius) p.active=false;
+      }
+      // ノックバック＋ダメージ
+      if(this.f%20===0){
+        for(let f of fs){
+          if(!f.dead&&dst(this,f)<this.radius+f.size){
+            f.takeDmg(this.dmg,this.owner);
+            const a=Math.atan2(f.y-this.y,f.x-this.x);
+            f.x+=Math.cos(a)*10;f.y+=Math.sin(a)*10;
+          }
         }
-
-        class Entity {
-            constructor(x,y,ang,spd,rng,dmg,owner) {
-                this.x=x; this.y=y; this.sx=x; this.sy=y; this.ang=ang; this.spd=spd; this.rng=rng; this.dmg=dmg; this.owner=owner; this.active=true;
-            }
-            update() {
-                this.x+=Math.cos(this.ang)*this.spd; this.y+=Math.sin(this.ang)*this.spd;
-                if(Math.hypot(this.x-this.sx,this.y-this.sy)>this.rng) this.active=false;
-                let tgts=this.owner.team==='p'?enemies:[player];
-                for(let t of tgts) if(!t.dead && Math.hypot(this.x-t.x,this.y-t.y) < t.size + 25) {
-                    t.hp-=this.dmg; this.active=false;
-                    if(t.hp<=0) { t.dead=true; if(t===player) handleDeath(); }
-                }
-            }
-            draw() {
-                ctx.fillStyle="#ff0"; ctx.beginPath(); ctx.arc(this.x,this.y,12,0,Math.PI*2); ctx.fill();
-            }
+      }
+    } else if(t==='maple'){
+      if(this.f%30===0){
+        for(let f of fs){
+          if(!f.dead&&dst(this,f)<this.radius+f.size){f.takeDmg(this.dmg,this.owner);f.slowF=0.5;}
         }
-
-        class Area {
-            constructor(x,y,type,owner,ang,rng,dmg) { this.x=x; this.y=y; this.owner=owner; this.ang=ang; this.rng=rng; this.dmg=dmg; this.birth=Date.now(); this.active=true; this.hit=new Set();}
-            update() {
-                if(Date.now()-this.birth > 200) { this.active=false; return; }
-                let tgts=this.owner.team==='p'?enemies:[player];
-                for(let t of tgts) if(!t.dead && !this.hit.has(t) && Math.hypot(this.x-t.x,this.y-t.y)<this.rng) {
-                    t.hp-=this.dmg; this.hit.add(t);
-                    if(t.hp<=0) { t.dead=true; if(t===player) handleDeath(); }
-                }
-            }
-            draw() {
-                ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.ang);
-                ctx.fillStyle="rgba(255,255,255,0.4)"; ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,this.rng,-Math.PI/3,Math.PI/3); ctx.fill();
-                ctx.restore();
-            }
+        for(let fr of friends(this.owner)){
+          if(!fr.dead&&dst(this,fr)<this.radius+fr.size) fr.hp=Math.min(fr.maxHp,fr.hp+100);
         }
-
-        function fire(act, ang) {
-            if(act.dead || act.ammo <= 0) return;
-            if(act.type === 'japan') {
-                act.state = {t:'jp_dash', end:Date.now()+180, ang:ang};
-            } else {
-                entities.push(new Entity(act.x, act.y, ang, 22, 700, C[act.type].dmg, act));
-            }
-            act.ammo--;
+      }
+    } else if(t==='syrup'){
+      if(this.f%20===0){
+        for(let f of fs){
+          if(!f.dead&&dst(this,f)<this.radius+f.size) f.slowF=0.45;
         }
-
-        let sticks = { m:{a:false,bx:0,by:0,cx:0,cy:0,id:null}, a:{a:false,bx:0,by:0,cx:0,cy:0,id:null} };
-        canvas.addEventListener("touchstart", e => {
-            for(let t of e.changedTouches) {
-                if(t.clientX < innerWidth/2) sticks.m={a:true,bx:t.clientX,by:t.clientY,cx:t.clientX,cy:t.clientY,id:t.identifier};
-                else sticks.a={a:true,bx:t.clientX,by:t.clientY,cx:t.clientX,cy:t.clientY,id:t.identifier};
-            }
-        });
-        canvas.addEventListener("touchmove", e => {
-            for(let t of e.changedTouches) {
-                for(let k in sticks) if(sticks[k].id===t.identifier) { sticks[k].cx=t.clientX; sticks[k].cy=t.clientY; }
-            }
-        });
-        canvas.addEventListener("touchend", e => {
-            for(let t of e.changedTouches) {
-                for(let k in sticks) if(sticks[k].id===t.identifier) {
-                    if(k==='a' && !player.dead) fire(player, Math.atan2(sticks.a.cy-sticks.a.by, sticks.a.cx-sticks.a.bx));
-                    sticks[k].a=false; sticks[k].id=null;
-                }
-            }
-        });
-
-        function loop() {
-            if(state==='play') {
-                ctx.clearRect(0,0,canvas.width,canvas.height);
-                if(!player.dead) { cam.x += (player.x - cam.x)*0.1; cam.y += (player.y - cam.y)*0.1; }
-                
-                ctx.save(); ctx.translate(canvas.width/2-cam.x, canvas.height/2-cam.y);
-                ctx.fillStyle="#111"; ctx.fillRect(0,0,WORLD.w,WORLD.h);
-                
-                // 日本のエイムガイド描画
-                if(sticks.a.a && player.type === 'japan' && !player.dead) {
-                    let ang = Math.atan2(sticks.a.cy-sticks.a.by, sticks.a.cx-sticks.a.bx);
-                    ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-                    ctx.lineWidth = 40; ctx.lineCap = "round";
-                    ctx.beginPath(); ctx.moveTo(player.x, player.y);
-                    ctx.lineTo(player.x + Math.cos(ang)*400, player.y + Math.sin(ang)*400); // 踏み込み予測距離
-                    ctx.stroke();
-                }
-
-                player.update(Math.atan2(sticks.m.cy-sticks.m.by, sticks.m.cx-sticks.m.bx), sticks.m.a);
-                enemies.forEach(e => {
-                    if(!e.dead) {
-                        let a=Math.atan2(player.y-e.y, player.x-e.x);
-                        e.update(a, Math.hypot(player.x-e.x, player.y-e.y)>350);
-                        if(Math.random()<0.01) fire(e, a);
-                    }
-                });
-
-                entities.forEach(e=>e.update()); entities=entities.filter(e=>e.active);
-                areas.forEach(a=>a.update()); areas=areas.filter(a=>a.active);
-                walls.forEach(w=>w.draw());
-                player.draw(); enemies.forEach(e=>e.draw()); entities.forEach(e=>e.draw()); areas.forEach(a=>a.draw());
-                ctx.restore();
-                
-                drawStick(120, canvas.height-120, sticks.m, "#fff");
-                drawStick(canvas.width-120, canvas.height-120, sticks.a, "#ff0");
-            }
-            requestAnimationFrame(loop);
+        for(let fr of friends(this.owner)){
+          if(!fr.dead&&dst(this,fr)<this.radius+fr.size) fr.hp=Math.min(fr.maxHp,fr.hp+80);
         }
-
-        function drawStick(x,y,s,c) {
-            ctx.beginPath(); ctx.arc(x,y,65,0,Math.PI*2); ctx.strokeStyle=c; ctx.lineWidth=3; ctx.stroke();
-            if(s.a){
-                let a=Math.atan2(s.cy-s.by,s.cx-s.bx); let d=Math.min(65,Math.hypot(s.cx-s.bx,s.cy-s.by));
-                ctx.beginPath(); ctx.arc(x+Math.cos(a)*d,y+Math.sin(a)*d,30,0,Math.PI*2); ctx.fillStyle="rgba(255,255,255,0.4)"; ctx.fill();
-            }
+      }
+    } else if(t==='bliz'){
+      if(this.f%60===0){
+        for(let f of fs){
+          if(!f.dead&&dst(this,f)<this.radius) f.takeDmg(130,this.owner);
         }
-        init();
-    </script>
+      }
+      for(let f of fs){
+        if(!f.dead&&dst(this,f)<this.radius) f.slowF=0.55;
+      }
+    }
+  }
+  draw(){
+    const prog=1-this.f/this.dur;
+    ctx.save();
+    const t=this.type;
+    if(t==='shock'){
+      ctx.strokeStyle=`rgba(255,200,0,${prog*0.8})`;ctx.lineWidth=7;
+      ctx.beginPath();ctx.arc(this.x,this.y,this.radius*(1.2-prog*0.2),0,Math.PI*2);ctx.stroke();
+    } else if(t==='slash'){
+      ctx.translate(this.x,this.y);ctx.rotate(this.ang);
+      ctx.fillStyle=`rgba(255,255,180,${prog*0.55})`;
+      ctx.beginPath();ctx.moveTo(0,0);ctx.arc(0,0,this.radius,-Math.PI/2.2,Math.PI/2.2);ctx.closePath();ctx.fill();
+    } else if(t==='expl'){
+      const r2=this.radius*(1.4-prog*0.4);
+      const g=ctx.createRadialGradient(this.x,this.y,0,this.x,this.y,r2);
+      g.addColorStop(0,`rgba(255,220,60,${prog})`);g.addColorStop(1,`rgba(255,60,0,0)`);
+      ctx.fillStyle=g;ctx.beginPath();ctx.arc(this.x,this.y,r2,0,Math.PI*2);ctx.fill();
+    } else if(t==='pizza'){
+      ctx.translate(this.x,this.y);ctx.rotate(this.f*0.28);
+      ctx.strokeStyle='rgba(255,120,80,0.85)';ctx.lineWidth=9;
+      ctx.beginPath();ctx.arc(0,0,this.radius,0,Math.PI*2);ctx.stroke();
+      ctx.strokeStyle='rgba(255,200,100,0.5)';ctx.lineWidth=3;ctx.stroke();
+    } else if(t==='channel'){
+      ctx.strokeStyle=`rgba(100,180,255,${prog*0.65})`;ctx.lineWidth=14;
+      ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.stroke();
+      ctx.strokeStyle=`rgba(200,240,255,${prog*0.4})`;ctx.lineWidth=4;ctx.stroke();
+    } else if(t==='wflag'){
+      ctx.strokeStyle=`rgba(255,255,255,${prog*0.35})`;ctx.lineWidth=3;ctx.setLineDash([9,9]);
+      ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle='#fff';ctx.font='26px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('W',this.x,this.y);
+    } else if(t==='maple'){
+      ctx.fillStyle=`rgba(210,70,0,${prog*0.38})`;
+      ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#fff';ctx.font='18px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('M',this.x,this.y);
+    } else if(t==='syrup'){
+      ctx.fillStyle=`rgba(200,120,20,${prog*0.42})`;
+      ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();
+    } else if(t==='bliz'){
+      ctx.fillStyle=`rgba(180,220,255,0.16)`;
+      ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle=`rgba(200,235,255,0.45)`;ctx.lineWidth=4;ctx.stroke();
+      ctx.fillStyle='rgba(255,255,255,0.7)';
+      for(let i=0;i<7;i++){
+        const a=this.f*0.04+i*Math.PI*2/7;
+        const r3=this.radius*0.65*(0.6+0.4*Math.sin(this.f*0.025+i));
+        ctx.beginPath();ctx.arc(this.x+Math.cos(a)*r3,this.y+Math.sin(a)*r3,4,0,Math.PI*2);ctx.fill();
+      }
+    } else if(t==='strike_mk'){
+      ctx.strokeStyle=`rgba(255,50,50,${prog})`;ctx.lineWidth=3;ctx.setLineDash([7,7]);
+      ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle=`rgba(255,50,50,${prog*0.22})`;
+      ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=`rgba(255,200,200,${prog})`;ctx.font='22px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('!',this.x,this.y);
+    }
+    ctx.restore();
+  }
+}
+
+class HealItem{
+  constructor(x,y,team,amount){this.x=x;this.y=y;this.team=team;this.amount=amount;this.active=true;this.radius=26;this.timer=320;}
+  apply(a){if(!this.active) return;a.hp=Math.min(a.maxHp,a.hp+this.amount);this.active=false;}
+  update(){this.timer--;if(this.timer<=0) this.active=false;}
+  draw(){
+    ctx.fillStyle='rgba(80,255,120,0.55)';ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold 16px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('+',this.x,this.y);
+  }
+}
+
+function checkEnd(){
+  const aAlive=[player,...allies].filter(a=>a&&!a.dead);
+  const eAlive=enemies.filter(a=>!a.dead);
+  if(eAlive.length===0&&gameResult!=='win'){
+    gameResult='win';
+    document.getElementById('winUI').style.display='flex';
+  }
+}
+
+// --- 入力 ---
+canvas.addEventListener('touchstart',e=>{
+  e.preventDefault();
+  for(let t of e.changedTouches){
+    const x=t.clientX,w=innerWidth;
+    if(x<w*0.33) asgn(stk.mv,t);
+    else if(x<w*0.67) asgn(stk.at,t);
+    else asgn(stk.sp,t);
+  }
+},{passive:false});
+canvas.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  for(let t of e.changedTouches){
+    for(const k of ['mv','at','sp']){
+      if(stk[k].id===t.identifier){stk[k].cx=t.clientX;stk[k].cy=t.clientY;}
+    }
+  }
+},{passive:false});
+canvas.addEventListener('touchend',e=>{
+  e.preventDefault();
+  for(let t of e.changedTouches){
+    for(const k of ['mv','at','sp']){
+      if(stk[k].id===t.identifier){
+        if(k==='at'&&player&&!player.dead){
+          const dx=stk.at.cx-stk.at.bx,dy=stk.at.cy-stk.at.by;
+          if(Math.hypot(dx,dy)>14) player.atk(Math.atan2(dy,dx));
+        }
+        if(k==='sp'&&player&&!player.dead){
+          const dx=stk.sp.cx-stk.sp.bx,dy=stk.sp.cy-stk.sp.by;
+          if(Math.hypot(dx,dy)>14) player.special(Math.atan2(dy,dx));
+        }
+        stk[k].a=false;stk[k].id=null;
+      }
+    }
+  }
+},{passive:false});
+function asgn(s,t){s.a=true;s.bx=t.clientX;s.by=t.clientY;s.cx=t.clientX;s.cy=t.clientY;s.id=t.identifier;}
+
+canvas.addEventListener('mousedown',e=>{
+  if(!player||player.dead||state!=='play') return;
+  const cx=innerWidth/2,cy=innerHeight/2;
+  const ang=Math.atan2(e.clientY-cy,e.clientX-cx);
+  if(e.button===2) player.special(ang);
+  else player.atk(ang);
+});
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+window.addEventListener('keydown',e=>keys[e.key]=true);
+window.addEventListener('keyup',e=>delete keys[e.key]);
+
+// --- 初期化 ---
+function initHome(){
+  const g=document.getElementById('charGrid');g.innerHTML='';
+  CKEYS.forEach(k=>{
+    const c=CHARS[k];
+    const b=document.createElement('div');b.className='char-btn';
+    b.innerHTML=`<span class="sym">${c.sym}</span><span class="nm">${c.name}</span><div class="st">HP:${c.baseHp} SPD:${c.spd}</div><div class="sp">${c.special}</div>`;
+    b.onclick=()=>startGame(k);
+    g.appendChild(b);
+  });
+}
+
+function startGame(pt){
+  document.getElementById('homeUI').classList.add('hidden');
+  buildMap();
+  player=new Actor(620,2500,TEAM.P,pt);
+  const ats=CKEYS.filter(k=>k!==pt);shuffle(ats);
+  allies=[new Actor(620,2200,TEAM.A,ats[0]),new Actor(620,2800,TEAM.A,ats[1])];
+  const ets=[...CKEYS];shuffle(ets);
+  enemies=[new Actor(4380,2200,TEAM.E,ets[0]),new Actor(4380,2500,TEAM.E,ets[1]),new Actor(4380,2800,TEAM.E,ets[2])];
+  state='play';gameResult=null;
+  requestAnimationFrame(loop);
+}
+
+// --- ループ ---
+function loop(){
+  if(state!=='play'){requestAnimationFrame(loop);return;}
+  frameCount++;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  if(!player.dead){cam.x+=(player.x-cam.x)*0.1;cam.y+=(player.y-cam.y)*0.1;}
+
+  // プレイヤー操作
+  if(player&&!player.dead){
+    let ax=0,ay=0;
+    if(keys['w']||keys['ArrowUp']) ay=-1;
+    if(keys['s']||keys['ArrowDown']) ay=1;
+    if(keys['a']||keys['ArrowLeft']) ax=-1;
+    if(keys['d']||keys['ArrowRight']) ax=1;
+    if(ax||ay){const l=Math.hypot(ax,ay);player.move(ax/l,ay/l);}
+    if(stk.mv.a){const dx=stk.mv.cx-stk.mv.bx,dy=stk.mv.cy-stk.mv.by;const l=Math.hypot(dx,dy);if(l>12) player.move(dx/l,dy/l);}
+    // 攻撃スティックホールド連射
+    if(stk.at.a){
+      const dx=stk.at.cx-stk.at.bx,dy=stk.at.cy-stk.at.by;
+      if(Math.hypot(dx,dy)>20&&frameCount%18===0){
+        if(['usa','germany','finland'].includes(player.type)) player.atk(Math.atan2(dy,dx));
+      }
+    }
+  }
+
+  ctx.save();
+  ctx.translate(canvas.width/2-cam.x,canvas.height/2-cam.y);
+
+  // 背景
+  ctx.fillStyle='#111622';ctx.fillRect(0,0,WORLD.w,WORLD.h);
+  ctx.strokeStyle='rgba(255,255,255,0.03)';ctx.lineWidth=1;
+  for(let x=0;x<=WORLD.w;x+=200){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,WORLD.h);ctx.stroke();}
+  for(let y=0;y<=WORLD.h;y+=200){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(WORLD.w,y);ctx.stroke();}
+
+  // 壁
+  for(let w of walls){
+    if(w.hp<=0) continue;
+    if(w.brk){
+      const r=w.hp/w.maxHp;
+      ctx.fillStyle=`rgb(${Math.round(140*r+30)},${Math.round(90*r+20)},${Math.round(40*r+10)})`;
+    } else ctx.fillStyle='#2e3050';
+    ctx.fillRect(w.x,w.y,w.w,w.h);
+    if(!w.brk){ctx.strokeStyle='rgba(100,110,180,0.4)';ctx.lineWidth=1;ctx.strokeRect(w.x,w.y,w.w,w.h);}
+    if(w.brk&&isFinite(w.maxHp)){
+      ctx.fillStyle='rgba(255,140,40,0.45)';
+      ctx.fillRect(w.x,w.y,w.w*(w.hp/w.maxHp),Math.min(6,w.h));
+    }
+  }
+
+  // エリア→アイテム→弾→キャラ
+  areas.forEach(a=>a.draw());
+  items.forEach(it=>it.draw());
+  projectiles.forEach(p=>p.draw());
+
+  // エイムライン
+  if(stk.at.a&&player&&!player.dead){
+    const dx=stk.at.cx-stk.at.bx,dy=stk.at.cy-stk.at.by;
+    const ang=Math.atan2(dy,dx);
+    ctx.strokeStyle='rgba(255,230,0,0.3)';ctx.lineWidth=4;ctx.setLineDash([9,9]);
+    ctx.beginPath();ctx.moveTo(player.x,player.y);ctx.lineTo(player.x+Math.cos(ang)*600,player.y+Math.sin(ang)*600);ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  if(stk.sp.a&&player&&!player.dead){
+    const dx=stk.sp.cx-stk.sp.bx,dy=stk.sp.cy-stk.sp.by;
+    const ang=Math.atan2(dy,dx);
+    ctx.strokeStyle='rgba(200,100,255,0.4)';ctx.lineWidth=5;ctx.setLineDash([6,6]);
+    ctx.beginPath();ctx.moveTo(player.x,player.y);ctx.lineTo(player.x+Math.cos(ang)*450,player.y+Math.sin(ang)*450);ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  allies.forEach(a=>a.drawSelf());
+  enemies.forEach(e=>e.drawSelf());
+  if(player) player.drawSelf();
+
+  ctx.restore();
+
+  // 更新
+  [player,...allies,...enemies].forEach(a=>{if(a) a.update();});
+  [...allies,...enemies].forEach(a=>{if(a) a.aiUpdate();});
+  projectiles.forEach(p=>p.update());projectiles=projectiles.filter(p=>p.active);
+  areas.forEach(a=>a.update());areas=areas.filter(a=>a.active);
+  items.forEach(it=>it.update());items=items.filter(it=>it.active);
+  walls=walls.filter(w=>isFinite(w.hp)||true);// 壁は消さない（hp<=0で非表示）
+
+  // スティックUI
+  drawStk(110,canvas.height-130,stk.mv,'#4af','移動');
+  drawStk(canvas.width/2,canvas.height-130,stk.at,'#ff4','通常');
+  drawStk(canvas.width-110,canvas.height-130,stk.sp,'#c4f','特殊');
+
+  // SPゲージ（画面右上）
+  if(player&&!player.dead){
+    const gw=150,gh=13,gx=canvas.width-gw-14,gy=14;
+    ctx.fillStyle='rgba(0,0,0,0.55)';ctx.fillRect(gx-5,gy-5,gw+10,gh+32);
+    ctx.fillStyle='#222';ctx.fillRect(gx,gy,gw,gh);
+    const ratio=player.spGauge/player.spMax;
+    ctx.fillStyle=ratio>=1?'#d8b4fe':'#7c3aed';
+    ctx.fillRect(gx,gy,gw*ratio,gh);
+    ctx.fillStyle=ratio>=1?'#fff':'#aaa';ctx.font='bold 10px Arial';ctx.textAlign='left';
+    ctx.fillText(ratio>=1?`[SP準備完了] ${CHARS[player.type].special}`:`SP: ${Math.floor(ratio*100)}% | ${CHARS[player.type].special}`,gx,gy+gh+13);
+  }
+
+  // ミニマップ
+  drawMM();
+
+  requestAnimationFrame(loop);
+}
+
+function drawStk(x,y,s,col,lbl){
+  ctx.save();ctx.globalAlpha=0.55;
+  ctx.beginPath();ctx.arc(x,y,52,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,0.3)';ctx.fill();
+  ctx.strokeStyle=col;ctx.lineWidth=2.5;ctx.stroke();
+  if(s.a){
+    const ang=Math.atan2(s.cy-s.by,s.cx-s.bx);
+    const d=Math.min(42,Math.hypot(s.cx-s.bx,s.cy-s.by));
+    ctx.beginPath();ctx.arc(x+Math.cos(ang)*d,y+Math.sin(ang)*d,20,0,Math.PI*2);
+    ctx.fillStyle=col+'99';ctx.fill();
+  }
+  ctx.globalAlpha=1;
+  ctx.fillStyle='#bbb';ctx.font='11px Arial';ctx.textAlign='center';ctx.fillText(lbl,x,y+68);
+  ctx.restore();
+}
+
+function drawMM(){
+  const mw=110,mh=110,mx=14,my=14;
+  ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(mx,my,mw,mh);
+  ctx.strokeStyle='#445';ctx.lineWidth=1;ctx.strokeRect(mx,my,mw,mh);
+  const sx=mw/WORLD.w,sy=mh/WORLD.h;
+  ctx.fillStyle='#445';
+  for(let w of walls){if(w.hp<=0) continue;ctx.fillRect(mx+w.x*sx,my+w.y*sy,Math.max(1,w.w*sx),Math.max(1,w.h*sy));}
+  const dot=(a,c)=>{
+    if(!a||a.dead) return;
+    ctx.fillStyle=c;ctx.beginPath();ctx.arc(mx+a.x*sx,my+a.y*sy,3.5,0,Math.PI*2);ctx.fill();
+  };
+  dot(player,'#0ff');
+  allies.forEach(a=>dot(a,'#0f0'));
+  enemies.forEach(e=>dot(e,'#f44'));
+}
+
+initHome();
+</script>
 </body>
 </html>
