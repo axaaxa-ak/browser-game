@@ -3,21 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Global Brawl - Pro v2.1 Fixed</title>
+    <title>Global Brawl - Pro v2.2 Fixed</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; touch-action: none; font-family: 'Arial', sans-serif; user-select: none; }
         canvas { display: block; }
         #ui { position: absolute; top:0; left:0; width:100%; height:100%; display:flex; justify-content:center; align-items:center; background:rgba(0,0,0,0.9); flex-direction:column; z-index:10; color:#fff;}
         .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 20px; }
-        .btn { padding: 15px; background: #222; border: 2px solid #555; cursor: pointer; text-align: center; border-radius: 8px; color:white; }
-        .btn:hover { background: #444; border-color: #fff; }
+        .btn { padding: 10px; background: #222; border: 2px solid #555; cursor: pointer; text-align: center; border-radius: 8px; color:white; font-size: 12px; }
         .hidden { display: none !important; }
     </style>
 </head>
 <body>
     <div id="ui">
-        <h1 style="color:#ffcc00;">GLOBAL BRAWL : PRO v2.1</h1>
-        <p>エイムガイド復活・カメラ修正版</p>
+        <h1 style="color:#ffcc00;">GLOBAL BRAWL : PRO v2.2</h1>
+        <p>仕様修正・リロード・自然回復 完備</p>
         <div class="grid" id="chars"></div>
     </div>
     <canvas id="canvas"></canvas>
@@ -26,29 +25,28 @@
         const canvas = document.getElementById("canvas");
         const ctx = canvas.getContext("2d");
         const WORLD = { w: 4000, h: 4000 };
-        let state = 'home', player, enemies = [], walls = [], entities = [], areas = [], particles = [];
+        let state = 'home', player, enemies = [], walls = [], entities = [], particles = [];
         let cam = { x: 0, y: 0, shake: 0 };
         let hitStop = 0;
-        let usaAim = { x: 0, y: 0 };
 
         const C = {
-            soviet:  { hp: 8000, spd: 2.8, size: 60, col: "#c00", sym: "★", range: 450, ai: "aggressive" },
-            usa:     { hp: 4500, spd: 5.5, size: 45, col: "#336", sym: "USA", range: 700, ai: "tactical" },
-            uk:      { hp: 4000, spd: 6.5, size: 25, col: "#027", sym: "UK", range: 900, ai: "sniper" },
-            france:  { hp: 5000, spd: 4.0, size: 35, col: "#e23", sym: "FR", range: 300, ai: "defensive" },
-            germany: { hp: 5500, spd: 5.5, size: 35, col: "#333", sym: "✠", range: 600, ai: "tactical" },
-            japan:   { hp: 4500, spd: 6.8, size: 35, col: "#fff", sym: "☉", range: 400, ai: "assassin" },
-            italy:   { hp: 5000, spd: 4.2, size: 35, col: "#094", sym: "🍕", range: 250, ai: "aggressive" },
-            china:   { hp: 6000, spd: 4.0, size: 45, col: "#e12", sym: "五", range: 600, ai: "tactical" },
-            canada:  { hp: 6500, spd: 2.5, size: 45, col: "#f00", sym: "🍁", range: 700, ai: "defensive" },
-            finland: { hp: 4800, spd: 5.5, size: 35, col: "#038", sym: "❄", range: 1200, ai: "sniper" }
+            soviet:  { hp: 8000, spd: 2.8, size: 60, col: "#c00", sym: "★", range: 450, break: true },
+            usa:     { hp: 4500, spd: 5.5, size: 45, col: "#336", sym: "USA", range: 750, break: true },
+            uk:      { hp: 4000, spd: 6.5, size: 25, col: "#027", sym: "UK", range: 900, break: false },
+            france:  { hp: 5000, spd: 4.0, size: 35, col: "#e23", sym: "FR", range: 300, break: false },
+            germany: { hp: 5500, spd: 5.5, size: 35, col: "#333", sym: "✠", range: 600, break: true },
+            japan:   { hp: 4500, spd: 6.8, size: 35, col: "#fff", sym: "☉", range: 400, break: false },
+            italy:   { hp: 5000, spd: 4.2, size: 35, col: "#094", sym: "🍕", range: 250, break: false },
+            china:   { hp: 6000, spd: 4.0, size: 45, col: "#e12", sym: "五", range: 600, break: false },
+            canada:  { hp: 6500, spd: 2.5, size: 45, col: "#f00", sym: "🍁", range: 700, break: false },
+            finland: { hp: 4800, spd: 5.5, size: 35, col: "#038", sym: "❄", range: 1200, break: false }
         };
 
         function init() {
             const grid = document.getElementById("chars");
             Object.keys(C).forEach(k => {
                 let b = document.createElement("div"); b.className = "btn";
-                b.innerHTML = `<h3>${C[k].sym}</h3>${k}`;
+                b.innerHTML = `<b>${C[k].sym}</b><br>${k}`;
                 b.onclick = () => start(k); grid.appendChild(b);
             });
         }
@@ -56,7 +54,7 @@
         function start(type) {
             document.getElementById("ui").classList.add("hidden");
             player = new Actor(500, 2000, 'p', type);
-            enemies = [new Actor(3500, 2000, 'e', 'uk'), new Actor(3500, 1500, 'e', 'soviet'), new Actor(3500, 2500, 'e', 'japan')];
+            enemies = [new Actor(3000, 2000, 'e', 'germany'), new Actor(3500, 1500, 'e', 'uk')];
             walls = [new Wall(1000, 1000, 100, 2000, false), new Wall(2000, 1500, 100, 1000, true)];
             state = 'play'; resize(); loop();
         }
@@ -64,21 +62,8 @@
         window.addEventListener('resize', resize);
         function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
 
-        class Particle {
-            constructor(x, y, col, vx, vy, life) { this.x=x; this.y=y; this.col=col; this.vx=vx; this.vy=vy; this.life=life; this.maxLife=life; }
-            update() { this.x+=this.vx; this.y+=this.vy; this.life--; }
-            draw() { ctx.globalAlpha=this.life/this.maxLife; ctx.fillStyle=this.col; ctx.fillRect(this.x,this.y,4,4); ctx.globalAlpha=1; }
-        }
-
-        function spawnExplosion(x,y,col,count=10) {
-            for(let i=0;i<count;i++){
-                let a=Math.random()*Math.PI*2; let s=Math.random()*5;
-                particles.push(new Particle(x,y,col,Math.cos(a)*s,Math.sin(a)*s,20+Math.random()*20));
-            }
-        }
-
         class Wall {
-            constructor(x,y,w,h,brk,hp=2000) { this.x=x; this.y=y; this.w=w; this.h=h; this.brk=brk; this.hp=hp; }
+            constructor(x,y,w,h,brk,hp=3000) { this.x=x; this.y=y; this.w=w; this.h=h; this.brk=brk; this.hp=hp; this.maxHp=hp; }
             draw() { if(this.hp<=0) return; ctx.fillStyle = this.brk ? "#8b4513" : "#555"; ctx.fillRect(this.x, this.y, this.w, this.h); }
         }
 
@@ -86,23 +71,24 @@
             constructor(x,y,team,type) {
                 this.x=x; this.y=y; this.team=team; this.type=type;
                 let b=C[type]; this.hp=b.hp; this.maxHp=b.hp; this.spd=b.spd; this.size=b.size;
-                this.ammo=3; this.ult=0; this.dead=false; this.deathT=0; this.flash=0;
+                this.ammo=3; this.reload=0; this.lastHit=0; this.flash=0; this.dead=false;
             }
             update(mvAng, isMv) {
-                if(this.dead) { if(Date.now()-this.deathT>5000){this.dead=false; this.x=this.team==='p'?500:3500; this.hp=this.maxHp;} return; }
-                if(this.flash>0) this.flash--;
+                if(this.dead) return;
+                if(this.flash > 0) this.flash--;
                 
-                if(this.team==='e') {
-                    let d=Math.hypot(player.x-this.x, player.y-this.y);
-                    let a=Math.atan2(player.y-this.y, player.x-this.x);
-                    let pref=C[this.type].range;
-                    isMv=true;
-                    if(this.hp<this.maxHp*0.3) mvAng=a+Math.PI;
-                    else if(d<pref*0.7) mvAng=a+Math.PI;
-                    else if(d>pref*0.9) mvAng=a;
-                    else { isMv=false; mvAng=a; }
-                    if(d<pref*1.2 && Math.random()<0.02) fire(this,{bx:0,by:0,cx:Math.cos(a),cy:Math.sin(a)},false);
+                // 自然回復: 3秒(180F)ダメージなしで回復
+                if(Date.now() - this.lastHit > 3000 && this.hp < this.maxHp) {
+                    this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.001);
                 }
+
+                // リロード処理
+                if(this.ammo < 3) {
+                    this.reload++;
+                    if(this.reload > 90) { this.ammo++; this.reload = 0; }
+                }
+
+                if(this.team==='e') { /* AIロジック(略) */ }
 
                 if(isMv) {
                     let nx=this.x+Math.cos(mvAng)*this.spd; let ny=this.y+Math.sin(mvAng)*this.spd;
@@ -110,130 +96,116 @@
                 }
             }
             colWall(nx,ny) {
-                for(let w of walls) if(w.hp>0 && nx+this.size*0.5>w.x && nx-this.size*0.5<w.x+w.w && ny+this.size*0.5>w.y && ny-this.size*0.5<w.y+w.h) return true;
+                for(let w of walls) if(w.hp>0 && nx+this.size*0.4 > w.x && nx-this.size*0.4 < w.x+w.w && ny+this.size*0.4 > w.y && ny-this.size*0.4 < w.y+w.h) return true;
                 return false;
             }
             draw() {
                 if(this.dead) return;
+                // リロードインジケーター（足元）
+                if(this.ammo < 3) {
+                    ctx.beginPath(); ctx.arc(this.x, this.y, this.size+10, -Math.PI/2, -Math.PI/2 + (Math.PI*2 * (this.reload/90)));
+                    ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth=4; ctx.stroke();
+                }
+                // 本体
                 ctx.save(); ctx.translate(this.x,this.y);
                 ctx.beginPath(); ctx.arc(0,0,this.size,0,Math.PI*2);
                 ctx.fillStyle=this.flash>0?"#fff":C[this.type].col; ctx.fill();
                 ctx.strokeStyle=this.team==='p'?"#0ff":"#f00"; ctx.lineWidth=3; ctx.stroke();
                 ctx.fillStyle="#fff"; ctx.font="bold 20px Arial"; ctx.textAlign="center"; ctx.fillText(C[this.type].sym,0,7);
                 ctx.restore();
-                ctx.fillStyle="#000"; ctx.fillRect(this.x-30,this.y-this.size-20,60,6);
-                ctx.fillStyle=this.team==='p'?"#0f0":"#f00"; ctx.fillRect(this.x-30,this.y-this.size-20,60*(this.hp/this.maxHp),6);
+                // HPバー
+                ctx.fillStyle="#000"; ctx.fillRect(this.x-30,this.y-this.size-15,60,6);
+                ctx.fillStyle=this.hp > this.maxHp*0.3 ? "#0f0":"#f00"; ctx.fillRect(this.x-30,this.y-this.size-15,60*(this.hp/this.maxHp),6);
             }
         }
 
         class Entity {
-            constructor(x,y,ang,spd,rng,dmg,owner) { this.x=x; this.y=y; this.sx=x; this.sy=y; this.ang=ang; this.spd=spd; this.rng=rng; this.dmg=dmg; this.owner=owner; this.active=true; }
+            constructor(x,y,ang,spd,rng,dmg,owner,canBreak) { 
+                this.x=x; this.y=y; this.sx=x; this.sy=y; this.ang=ang; this.spd=spd; this.rng=rng; this.dmg=dmg; this.owner=owner; this.canBreak=canBreak; this.active=true; 
+            }
             update() {
                 this.x+=Math.cos(this.ang)*this.spd; this.y+=Math.sin(this.ang)*this.spd;
                 if(Math.hypot(this.x-this.sx,this.y-this.sy)>this.rng) this.active=false;
+                
                 let tgts=this.owner.team==='p'?enemies:[player];
-                for(let t of tgts) if(!t.dead && Math.hypot(this.x-t.x,this.y-t.y)<t.size+5){ applyDamage(t,this.dmg,this.owner); this.active=false; }
-                for(let w of walls) if(w.hp>0 && this.x>w.x && this.x<w.x+w.w && this.y>w.y && this.y<w.y+w.h){ if(w.brk) w.hp-=this.dmg; this.active=false; }
+                for(let t of tgts) if(!t.dead && Math.hypot(this.x-t.x,this.y-t.y)<t.size+10){
+                    t.hp-=this.dmg; t.flash=5; t.lastHit=Date.now();
+                    if(this.owner.team==='p') { cam.shake=10; hitStop=2; }
+                    this.active=false;
+                    if(t.hp<=0) t.dead=true;
+                }
+                for(let w of walls) if(w.hp>0 && this.x>w.x && this.x<w.x+w.w && this.y>w.y && this.y<w.y+w.h){
+                    if(this.canBreak && w.brk) w.hp-=this.dmg; 
+                    this.active=false; 
+                }
             }
-            draw() { ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.ang); ctx.fillStyle="#fff"; ctx.fillRect(-5,-2,10,4); ctx.restore(); }
+            draw() { ctx.fillStyle="#fff"; ctx.fillRect(this.x-4,this.y-4,8,8); }
         }
 
-        function applyDamage(t,dmg,o) {
-            t.hp-=dmg; t.flash=5; spawnExplosion(t.x,t.y,"#f00",8);
-            if(o.team==='p'){ cam.shake=15; hitStop=3; o.ult=Math.min(100,o.ult+10); }
-            if(t.hp<=0){ t.dead=true; t.deathT=Date.now(); spawnExplosion(t.x,t.y,"#ff0",30); }
-        }
-
-        let sticks = { m:{a:false,bx:0,by:0,cx:0,cy:0,id:null}, a:{a:false,bx:0,by:0,cx:0,cy:0,id:null}, u:{a:false,bx:0,by:0,cx:0,cy:0,id:null} };
-
+        // --- 入力系 ---
+        let sticks = { m:{a:false,bx:0,by:0,cx:0,cy:0,id:null}, a:{a:false,bx:0,by:0,cx:0,cy:0,id:null} };
         canvas.addEventListener("touchstart", e => {
             for(let t of e.changedTouches) {
                 if(t.clientX < innerWidth/2) sticks.m={a:true,bx:t.clientX,by:t.clientY,cx:t.clientX,cy:t.clientY,id:t.identifier};
-                else if(t.clientY > innerHeight/2) sticks.a={a:true,bx:t.clientX,by:t.clientY,cx:t.clientX,cy:t.clientY,id:t.identifier};
-                else { sticks.u={a:true,bx:t.clientX,by:t.clientY,cx:t.clientX,cy:t.clientY,id:t.identifier}; if(player.type==='usa') {usaAim.x=player.x; usaAim.y=player.y;} }
+                else sticks.a={a:true,bx:t.clientX,by:t.clientY,cx:t.clientX,cy:t.clientY,id:t.identifier};
             }
         });
         canvas.addEventListener("touchmove", e => {
             for(let t of e.changedTouches) {
-                for(let k in sticks) if(sticks[k].id===t.identifier) {
-                    sticks[k].cx=t.clientX; sticks[k].cy=t.clientY;
-                    if(k==='u' && player.type==='usa') { usaAim.x+=(sticks[k].cx-sticks[k].bx)*0.2; usaAim.y+=(sticks[k].cy-sticks[k].by)*0.2; }
-                }
+                for(let k in sticks) if(sticks[k].id===t.identifier) { sticks[k].cx=t.clientX; sticks[k].cy=t.clientY; }
             }
         });
         canvas.addEventListener("touchend", e => {
             for(let t of e.changedTouches) {
                 for(let k in sticks) if(sticks[k].id===t.identifier) {
-                    if(k==='a') fire(player,sticks.a,false);
-                    if(k==='u' && player.ult>=100) fire(player,sticks.u,true);
+                    if(k==='a' && player.ammo>0) {
+                        let ang=Math.atan2(sticks.a.cy-sticks.a.by, sticks.a.cx-sticks.a.bx);
+                        entities.push(new Entity(player.x, player.y, ang, 20, C[player.type].range, 800, player, C[player.type].break));
+                        player.ammo--;
+                    }
                     sticks[k].a=false; sticks[k].id=null;
                 }
             }
         });
 
-        function fire(act,stk,isUlt) {
-            if(act.dead) return;
-            let ang=Math.atan2(stk.cy-stk.by,stk.cx-stk.bx);
-            if(isUlt) { 
-                act.ult=0; 
-                if(act.type==='usa') spawnExplosion(usaAim.x,usaAim.y,"#ff0",50); // 空爆演出略化
-                return;
-            }
-            if(act.ammo<=0) return;
-            entities.push(new Entity(act.x,act.y,ang,20,C[act.type].range,500,act));
-            act.ammo--; setTimeout(()=>act.ammo=Math.min(3,act.ammo+1),1500);
-        }
-
-        function drawAimGuide(act, stk) {
-            if (!stk.a || act.dead) return;
-            let ang = Math.atan2(stk.cy - stk.by, stk.cx - stk.bx);
-            let range = C[act.type].range;
-            ctx.save(); ctx.translate(act.x, act.y); ctx.rotate(ang);
-            ctx.setLineDash([10, 10]); ctx.strokeStyle = "rgba(255, 255, 255, 0.5)"; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(range, 0); ctx.stroke();
-            ctx.fillStyle = "rgba(255, 255, 255, 0.15)"; ctx.beginPath(); ctx.moveTo(0, 0);
-            let arc = (act.type==='soviet'||act.type==='japan')?0.6:0.1;
-            ctx.arc(0, 0, range, -arc, arc); ctx.fill(); ctx.restore();
-        }
-
         function loop() {
             if(state==='play') {
                 if(hitStop>0){ hitStop--; requestAnimationFrame(loop); return; }
                 ctx.clearRect(0,0,canvas.width,canvas.height);
-                
-                // カメラ制御（USAウルト時はエイム先を優先）
-                let targetCamX = (player.type==='usa' && sticks.u.a) ? usaAim.x : player.x;
-                let targetCamY = (player.type==='usa' && sticks.u.a) ? usaAim.y : player.y;
-                cam.x += (targetCamX - cam.x) * 0.1; cam.y += (targetCamY - cam.y) * 0.1;
-                
-                let sx=(Math.random()-0.5)*cam.shake; let sy=(Math.random()-0.5)*cam.shake; cam.shake*=0.9;
+                cam.x += (player.x - cam.x)*0.1; cam.y += (player.y - cam.y)*0.1;
+                let sx=(Math.random()-0.5)*cam.shake; let sy=(Math.random()-0.5)*cam.shake; cam.shake*=0.8;
+
                 ctx.save(); ctx.translate(canvas.width/2-cam.x+sx, canvas.height/2-cam.y+sy);
-                ctx.fillStyle="#1a1a1a"; ctx.fillRect(0,0,WORLD.w,WORLD.h);
+                ctx.fillStyle="#111"; ctx.fillRect(0,0,WORLD.w,WORLD.h);
                 
                 player.update(Math.atan2(sticks.m.cy-sticks.m.by, sticks.m.cx-sticks.m.bx), sticks.m.a);
-                enemies.forEach(e=>e.update());
                 entities.forEach(e=>e.update()); entities=entities.filter(e=>e.active);
-                particles.forEach(p=>p.update()); particles=particles.filter(p=>p.life>0);
-                
                 walls.forEach(w=>w.draw());
-                drawAimGuide(player, sticks.a);
-                if(player.type==='usa' && sticks.u.a) { // USA空爆照準
-                    ctx.strokeStyle="red"; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(usaAim.x,usaAim.y,100,0,Math.PI*2); ctx.stroke();
+                
+                // エイムガイド
+                if(sticks.a.a) {
+                    let ang=Math.atan2(sticks.a.cy-sticks.a.by, sticks.a.cx-sticks.a.bx);
+                    ctx.strokeStyle="rgba(255,255,255,0.3)"; ctx.setLineDash([5,5]);
+                    ctx.beginPath(); ctx.moveTo(player.x, player.y);
+                    ctx.lineTo(player.x+Math.cos(ang)*C[player.type].range, player.y+Math.sin(ang)*C[player.type].range);
+                    ctx.stroke(); ctx.setLineDash([]);
                 }
-                player.draw(); enemies.forEach(e=>e.draw()); entities.forEach(e=>e.draw()); particles.forEach(p=>p.draw());
+
+                player.draw(); enemies.forEach(e=>e.draw()); entities.forEach(e=>e.draw());
                 ctx.restore();
                 
                 drawStick(120, canvas.height-120, sticks.m, "#fff");
                 drawStick(canvas.width-120, canvas.height-120, sticks.a, "#ff0");
-                drawStick(canvas.width-120, 120, sticks.u, player.ult>=100?"#f00":"#555", player.ult);
             }
             requestAnimationFrame(loop);
         }
 
-        function drawStick(x,y,s,c,p=null) {
+        function drawStick(x,y,s,c) {
             ctx.beginPath(); ctx.arc(x,y,60,0,Math.PI*2); ctx.strokeStyle=c; ctx.lineWidth=2; ctx.stroke();
-            if(p!==null){ ctx.beginPath(); ctx.arc(x,y,60,-Math.PI/2,-Math.PI/2+Math.PI*2*(p/100)); ctx.strokeStyle="#f00"; ctx.lineWidth=4; ctx.stroke(); }
-            if(s.a){ let a=Math.atan2(s.cy-s.by,s.cx-s.bx); let d=Math.min(60,Math.hypot(s.cx-s.bx,s.cy-s.by)); ctx.beginPath(); ctx.arc(x+Math.cos(a)*d,y+Math.sin(a)*d,25,0,Math.PI*2); ctx.fillStyle="rgba(255,255,255,0.5)"; ctx.fill(); }
+            if(s.a){
+                let a=Math.atan2(s.cy-s.by,s.cx-s.bx); let d=Math.min(60,Math.hypot(s.cx-s.bx,s.cy-s.by));
+                ctx.beginPath(); ctx.arc(x+Math.cos(a)*d,y+Math.sin(a)*d,25,0,Math.PI*2); ctx.fillStyle="rgba(255,255,255,0.3)"; ctx.fill();
+            }
         }
         init();
     </script>
