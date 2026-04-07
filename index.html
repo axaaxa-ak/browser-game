@@ -1,9 +1,11 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Global Brawl Prototype</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #1a1a1a; touch-action: none; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background: #1a1a1a; touch-action: none; font-family: 'Arial', sans-serif; }
         canvas { display: block; }
     </style>
 </head>
@@ -12,7 +14,25 @@
     <script>
         const canvas = document.getElementById("gameCanvas");
         const ctx = canvas.getContext("2d");
-        const WORLD_SIZE = 3000;
+
+        // --- 定数・設定 ---
+        const WORLD_SIZE = 2500;
+        const RESPAWN_TIME = 5000;
+        const GRID_SIZE = 100;
+
+        // キャラクター性能データ
+        const CHAR_DATA = {
+            soviet: { hp: 8000, speed: 2.5, size: 50, reload: 2500, range: 350, dmg: [800, 1000, 1200] },
+            usa: { hp: 4500, speed: 4.5, size: 40, reload: 1800, range: 600, dmg: 250 },
+            uk: { hp: 4000, speed: 5.0, size: 25, reload: 2000, range: 700, dmg: 1500 },
+            france: { hp: 5000, speed: 3.5, size: 35, reload: 1700, range: 250, dmg: 900 },
+            germany: { hp: 5500, speed: 4.2, size: 35, reload: 1500, range: 450, dmg: 150 },
+            japan: { hp: 4500, speed: 5.2, size: 35, reload: 1000, range: 300, dmg: [1200, 800] },
+            italy: { hp: 5000, speed: 3.5, size: 35, reload: 5000, range: 150, dmg: 200 },
+            china: { hp: 6000, speed: 3.5, size: 40, reload: 1800, range: 400, dmg: 300 },
+            canada: { hp: 6500, speed: 2.8, size: 40, reload: 2200, range: 550, dmg: 400 },
+            finland: { hp: 4800, speed: 4.5, size: 35, reload: 2000, range: 800, dmg: 1800 }
+        };
 
         function resize() {
             canvas.width = window.innerWidth;
@@ -21,39 +41,95 @@
         window.addEventListener('resize', resize);
         resize();
 
-        // キャラクターテンプレート
-        class Character {
-            constructor(x, y, team, type) {
-                this.x = x; this.y = y; this.team = team; this.type = type;
-                this.hp = 5000; this.maxHp = 5000;
-                this.ammo = 3; this.maxAmmo = 3;
-                this.size = 30; this.speed = 3;
-                this.ultGauge = 0;
-                this.lastReload = Date.now();
-                this.isDead = false;
-                this.respawnTimer = 0;
-                this.attackStep = 1; // ソビエト用
+        // --- クラス定義 ---
+
+        class Bullet {
+            constructor(x, y, angle, speed, range, dmg, owner, type = "normal", canBreak = false) {
+                this.x = x; this.y = y; this.startX = x; this.startY = y;
+                this.angle = angle; this.speed = speed; this.range = range;
+                this.dmg = dmg; this.owner = owner; this.type = type;
+                this.canBreak = canBreak; this.active = true;
             }
-
-            draw() {
-                if(this.isDead) return;
-                // 自キャラ中心描画
-                ctx.fillStyle = this.team === "player" ? "#00a2ff" : "#ff4444";
-                ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI*2); ctx.fill();
-
-                // 頭上UI
-                ctx.fillStyle = "white";
-                ctx.textAlign = "center";
-                ctx.fillText(`HP: ${Math.floor(this.hp)}`, this.x, this.y - this.size - 20);
-                ctx.fillText("●".repeat(this.ammo), this.x, this.y - this.size - 5);
+            update() {
+                this.x += Math.cos(this.angle) * this.speed;
+                this.y += Math.sin(this.angle) * this.speed;
+                const dist = Math.sqrt((this.x - this.startX)**2 + (this.y - this.startY)**2);
+                if (dist > this.range) this.active = false;
             }
         }
 
-        let p1 = new Character(1500, 1500, "player", "soviet");
-        let enemies = [new Character(1700, 1700, "enemy", "usa")];
+        class Wall {
+            constructor(x, y, w, h, type) {
+                this.x = x; this.y = y; this.w = w; this.h = h;
+                this.type = type; // 0:堅固, 1:弾貫通(柵), 2:壊れる壁
+                this.hp = type === 2 ? 1500 : Infinity;
+                this.active = true;
+            }
+        }
+
+        class Actor {
+            constructor(x, y, team, charType) {
+                this.x = x; this.y = y; this.team = team; this.charType = charType;
+                const data = CHAR_DATA[charType];
+                this.hp = data.hp; this.maxHp = data.hp;
+                this.speed = data.speed; this.size = data.size;
+                this.ammo = 3; this.maxAmmo = (charType === 'italy') ? 1 : 3;
+                this.ult = 0; // 0 to 100
+                this.lastReload = Date.now();
+                this.isDead = false;
+                this.deathTime = 0;
+                this.attackStep = 0;
+            }
+
+            update(moveAngle, isMoving) {
+                if (this.isDead) {
+                    if (Date.now() - this.deathTime > RESPAWN_TIME) {
+                        this.hp = this.maxHp; this.isDead = false; this.x = this.team === "player" ? 500 : 2000; this.y = 1250;
+                    }
+                    return;
+                }
+
+                // リロード
+                const reloadSpeed = CHAR_DATA[this.charType].reload;
+                if (this.ammo < this.maxAmmo && Date.now() - this.lastReload > reloadSpeed) {
+                    this.ammo++;
+                    this.lastReload = Date.now();
+                }
+
+                // 移動と衝突判定
+                if (isMoving) {
+                    let nx = this.x + Math.cos(moveAngle) * this.speed;
+                    let ny = this.y + Math.sin(moveAngle) * this.speed;
+                    
+                    if (!this.checkWall(nx, this.y)) this.x = nx;
+                    if (!this.checkWall(this.x, ny)) this.y = ny;
+
+                    // 画面外禁止
+                    this.x = Math.max(this.size, Math.min(WORLD_SIZE - this.size, this.x));
+                    this.y = Math.max(this.size, Math.min(WORLD_SIZE - this.size, this.y));
+                }
+            }
+
+            checkWall(nx, ny) {
+                for (let w of walls) {
+                    if (!w.active) continue;
+                    if (nx + this.size/2 > w.x && nx - this.size/2 < w.x + w.w &&
+                        ny + this.size/2 > w.y && ny - this.size/2 < w.y + w.h) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+
+        // --- ゲーム状態 ---
+        let player = new Actor(500, 1250, "player", "soviet");
+        let enemies = [new Actor(2000, 1250, "enemy", "usa")];
+        let bullets = [];
         let walls = [
-            {x: 1400, y: 1300, w: 200, h: 50, dest: true, bulletPass: true, hp: 1000}, // 弾すり抜け・壊れる壁
-            {x: 1600, y: 1500, w: 50, h: 200, dest: false, bulletPass: false} // 絶対壊れない壁
+            new Wall(1000, 500, 100, 1500, 0), // 堅固
+            new Wall(1400, 1000, 300, 50, 1),  // 柵（弾通る）
+            new Wall(800, 1000, 100, 200, 2)   // 壊れる
         ];
 
         let sticks = {
@@ -62,91 +138,156 @@
             ult: { active: false, id: null, bx: 0, by: 0, cx: 0, cy: 0 }
         };
 
+        // --- 入力処理 ---
         canvas.addEventListener("touchstart", (e) => {
             for (let t of e.changedTouches) {
-                if (t.clientX < canvas.width * 0.4) setupStick('move', t);
-                else if (t.clientY > canvas.height * 0.5) setupStick('atk', t);
-                else setupStick('ult', t);
+                if (t.clientX < canvas.width / 3) initStick('move', t);
+                else if (t.clientX > canvas.width * 0.7 && t.clientY > canvas.height/2) initStick('atk', t);
+                else if (t.clientX > canvas.width * 0.7 && t.clientY < canvas.height/2) initStick('ult', t);
             }
         });
 
-        function setupStick(type, t) {
-            sticks[type].active = true;
-            sticks[type].id = t.identifier;
-            sticks[type].bx = sticks[type].cx = t.clientX;
-            sticks[type].by = sticks[type].cy = t.clientY;
+        function initStick(k, t) {
+            sticks[k].active = true; sticks[k].id = t.identifier;
+            sticks[k].bx = sticks[k].cx = t.clientX; sticks[k].by = sticks[k].cy = t.clientY;
         }
 
         canvas.addEventListener("touchmove", (e) => {
             for (let t of e.changedTouches) {
-                for (let key in sticks) {
-                    if (sticks[key].id === t.identifier) {
-                        sticks[key].cx = t.clientX;
-                        sticks[key].cy = t.clientY;
-                    }
+                for (let k in sticks) if (sticks[k].id === t.identifier) {
+                    sticks[k].cx = t.clientX; sticks[k].cy = t.clientY;
                 }
             }
         });
 
         canvas.addEventListener("touchend", (e) => {
             for (let t of e.changedTouches) {
-                for (let key in sticks) {
-                    if (sticks[key].id === t.identifier) {
-                        if(key === 'atk') performAttack(p1, sticks.atk);
-                        sticks[key].active = false;
-                        sticks[key].id = null;
-                    }
+                for (let k in sticks) if (sticks[k].id === t.identifier) {
+                    if (k === 'atk' || k === 'ult') fire(player, sticks[k], k === 'ult');
+                    sticks[k].active = false; sticks[k].id = null;
                 }
             }
         });
 
-        function performAttack(char, stick) {
-            if (char.ammo <= 0) return;
-            const angle = Math.atan2(stick.cy - stick.by, stick.cx - stick.bx);
-            // ソビエトの段階的革命論ロジックをここに実装
-            console.log("Attack step:", char.attackStep, "Angle:", angle);
-            char.ammo--;
-            char.attackStep = (char.attackStep % 3) + 1;
-        }
+        function fire(actor, stick, isUlt) {
+            if (actor.isDead) return;
+            if (!isUlt && actor.ammo <= 0) return;
+            if (isUlt && actor.ult < 100) return;
 
-        function update() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // プレイヤー移動 & 衝突
-            if (sticks.move.active) {
-                let dx = sticks.move.cx - sticks.move.bx;
-                let dy = sticks.move.cy - sticks.move.by;
-                let angle = Math.atan2(dy, dx);
-                p1.x += Math.cos(angle) * p1.speed;
-                p1.y += Math.sin(angle) * p1.speed;
+            const angle = Math.atan2(stick.cy - stick.by, stick.cx - stick.bx);
+            const data = CHAR_DATA[actor.charType];
+
+            if (actor.charType === "soviet") {
+                if (actor.attackStep === 0) bullets.push(new Bullet(actor.x, actor.y, angle, 8, 300, 800, actor, "melee"));
+                else if (actor.attackStep === 1) bullets.push(new Bullet(actor.x, actor.y, angle, 6, 200, 1000, actor, "swing"));
+                else bullets.push(new Bullet(actor.x, actor.y, angle, 12, 600, 1200, actor, "return"));
+                actor.attackStep = (actor.attackStep + 1) % 3;
+            } else {
+                bullets.push(new Bullet(actor.x, actor.y, angle, 15, data.range, data.dmg, actor));
             }
 
-            // カメラ開始
-            ctx.save();
-            ctx.translate(canvas.width/2 - p1.x, canvas.height/2 - p1.y);
+            if (isUlt) actor.ult = 0; else actor.ammo--;
+        }
 
-            // 壁とステージ境界
+        // --- ループ ---
+        function loop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // プレイヤー更新
+            let moveAngle = Math.atan2(sticks.move.cy - sticks.move.by, sticks.move.cx - sticks.move.bx);
+            player.update(moveAngle, sticks.move.active);
+
+            // 敵AI更新 (簡易)
+            enemies.forEach(en => {
+                if (en.isDead) return en.update(0, false);
+                let dist = Math.sqrt((player.x - en.x)**2 + (player.y - en.y)**2);
+                let angle = Math.atan2(player.y - en.y, player.x - en.x);
+                if (dist > 400) en.update(angle, true);
+                else if (dist < 300) en.update(angle + Math.PI, true);
+                else {
+                    en.update(0, false);
+                    if (Math.random() < 0.02) fire(en, {bx:0, by:0, cx:Math.cos(angle), cy:Math.sin(angle)}, false);
+                }
+            });
+
+            // 描画 (カメラ追従)
+            ctx.save();
+            ctx.translate(canvas.width/2 - player.x, canvas.height/2 - player.y);
+
+            // 背景
+            ctx.fillStyle = "#2a5a2a"; ctx.fillRect(0,0,WORLD_SIZE,WORLD_SIZE);
+            ctx.strokeStyle = "#1a4a1a";
+            for(let i=0; i<=WORLD_SIZE; i+=GRID_SIZE) {
+                ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,WORLD_SIZE); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(WORLD_SIZE,i); ctx.stroke();
+            }
+
+            // 壁
             walls.forEach(w => {
-                ctx.fillStyle = w.dest ? "#44aa44" : "#555";
+                if (!w.active) return;
+                ctx.fillStyle = w.type === 0 ? "#555" : (w.type === 1 ? "#44cc44aa" : "#8b4513");
                 ctx.fillRect(w.x, w.y, w.w, w.h);
             });
 
-            p1.draw();
-            enemies.forEach(e => e.draw());
+            // 弾の衝突判定
+            bullets = bullets.filter(b => {
+                b.update();
+                // 壁との衝突
+                for (let w of walls) {
+                    if (!w.active) continue;
+                    if (b.x > w.x && b.x < w.x + w.w && b.y > w.y && b.y < w.y + w.h) {
+                        if (w.type === 1) continue; // 柵は通る
+                        if (w.type === 2) w.hp -= b.dmg;
+                        if (w.hp <= 0) w.active = false;
+                        return false;
+                    }
+                }
+                // キャラとの衝突
+                let targets = b.owner.team === "player" ? enemies : [player];
+                for (let t of targets) {
+                    if (t.isDead) continue;
+                    let d = Math.sqrt((b.x - t.x)**2 + (b.y - t.y)**2);
+                    if (d < t.size) {
+                        t.hp -= b.dmg;
+                        if (b.owner.team === "player") b.owner.ult = Math.min(100, b.owner.ult + 10);
+                        if (t.hp <= 0) { t.isDead = true; t.deathTime = Date.now(); }
+                        return false;
+                    }
+                }
+                ctx.fillStyle = "yellow"; ctx.beginPath(); ctx.arc(b.x, b.y, 5, 0, Math.PI*2); ctx.fill();
+                return b.active;
+            });
+
+            // キャラ描画
+            [player, ...enemies].forEach(a => {
+                if (a.isDead) return;
+                ctx.fillStyle = a.team === "player" ? "#00a2ff" : "#ff4444";
+                ctx.beginPath(); ctx.arc(a.x, a.y, a.size, 0, Math.PI*2); ctx.fill();
+                
+                // 頭上UI
+                ctx.fillStyle = "white"; ctx.textAlign = "center"; ctx.font = "bold 16px Arial";
+                ctx.fillText(`${Math.floor(a.hp)}`, a.x, a.y - a.size - 25);
+                ctx.fillStyle = "#ffeb3b";
+                ctx.fillText("●".repeat(a.ammo) + "○".repeat(a.maxAmmo - a.ammo), a.x, a.y - a.size - 10);
+                if (a.team === "player") {
+                    ctx.fillStyle = "#ff4081";
+                    ctx.fillRect(a.x - 25, a.y - a.size - 5, a.ult/2, 5);
+                }
+            });
 
             ctx.restore();
 
-            // スティック描画
-            for(let key in sticks) {
-                if(sticks[key].active) {
-                    ctx.beginPath(); ctx.arc(sticks[key].bx, sticks[key].by, 40, 0, Math.PI*2);
-                    ctx.strokeStyle = "white"; ctx.stroke();
-                }
+            // スティックUI
+            for(let k in sticks) if(sticks[k].active) {
+                ctx.beginPath(); ctx.arc(sticks[k].bx, sticks[k].by, 50, 0, Math.PI*2);
+                ctx.strokeStyle = k === 'ult' ? "red" : "white"; ctx.stroke();
+                ctx.beginPath(); ctx.arc(sticks[k].cx, sticks[k].cy, 25, 0, Math.PI*2);
+                ctx.fillStyle = "rgba(255,255,255,0.3)"; ctx.fill();
             }
 
-            requestAnimationFrame(update);
+            requestAnimationFrame(loop);
         }
-        update();
+        loop();
     </script>
 </body>
 </html>
