@@ -3,7 +3,7 @@
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
-        body { margin: 0; overflow: hidden; background: #1a1a1a; touch-action: none; }
+        body { margin: 0; overflow: hidden; background: #1a1a1a; touch-action: none; font-family: sans-serif; }
         canvas { display: block; }
     </style>
 </head>
@@ -12,6 +12,7 @@
     <script>
         const canvas = document.getElementById("gameCanvas");
         const ctx = canvas.getContext("2d");
+        const WORLD_SIZE = 3000;
 
         function resize() {
             canvas.width = window.innerWidth;
@@ -20,142 +21,127 @@
         window.addEventListener('resize', resize);
         resize();
 
-        // ゲーム設定
-        const WORLD_SIZE = 2000; // ステージ全体の広さ
-        let player = { x: 1000, y: 1000, size: 20, color: "#00a2ff", ammo: 3, lastReload: Date.now() };
-        const RELOAD_TIME = 2000; // 1発回復に2秒
-        const BULLET_RANGE = 400; // 射程距離
+        // キャラクターテンプレート
+        class Character {
+            constructor(x, y, team, type) {
+                this.x = x; this.y = y; this.team = team; this.type = type;
+                this.hp = 5000; this.maxHp = 5000;
+                this.ammo = 3; this.maxAmmo = 3;
+                this.size = 30; this.speed = 3;
+                this.ultGauge = 0;
+                this.lastReload = Date.now();
+                this.isDead = false;
+                this.respawnTimer = 0;
+                this.attackStep = 1; // ソビエト用
+            }
 
-        let bullets = [];
-        let joystick = { active: false, baseX: 0, baseY: 0, currX: 0, currY: 0, id: null };
+            draw() {
+                if(this.isDead) return;
+                // 自キャラ中心描画
+                ctx.fillStyle = this.team === "player" ? "#00a2ff" : "#ff4444";
+                ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI*2); ctx.fill();
 
-        // 壁のデータ (type 0: 全貫通不可, type 1: 弾だけ貫通)
-        const walls = [
-            { x: 800, y: 800, w: 100, h: 200, type: 0, color: "#555" }, // 普通の壁
-            { x: 1100, y: 900, w: 200, h: 50, type: 1, color: "#44cc44aa" } // 弾が通る草むら/柵的な壁
+                // 頭上UI
+                ctx.fillStyle = "white";
+                ctx.textAlign = "center";
+                ctx.fillText(`HP: ${Math.floor(this.hp)}`, this.x, this.y - this.size - 20);
+                ctx.fillText("●".repeat(this.ammo), this.x, this.y - this.size - 5);
+            }
+        }
+
+        let p1 = new Character(1500, 1500, "player", "soviet");
+        let enemies = [new Character(1700, 1700, "enemy", "usa")];
+        let walls = [
+            {x: 1400, y: 1300, w: 200, h: 50, dest: true, bulletPass: true, hp: 1000}, // 弾すり抜け・壊れる壁
+            {x: 1600, y: 1500, w: 50, h: 200, dest: false, bulletPass: false} // 絶対壊れない壁
         ];
+
+        let sticks = {
+            move: { active: false, id: null, bx: 0, by: 0, cx: 0, cy: 0 },
+            atk: { active: false, id: null, bx: 0, by: 0, cx: 0, cy: 0 },
+            ult: { active: false, id: null, bx: 0, by: 0, cx: 0, cy: 0 }
+        };
 
         canvas.addEventListener("touchstart", (e) => {
             for (let t of e.changedTouches) {
-                if (t.clientX < canvas.width / 2 && !joystick.active) {
-                    joystick.active = true;
-                    joystick.baseX = t.clientX; joystick.baseY = t.clientY;
-                    joystick.currX = t.clientX; joystick.currY = t.clientY;
-                    joystick.id = t.identifier;
-                } else {
-                    if (player.ammo > 0) fireBullet(t.clientX, t.clientY);
-                }
+                if (t.clientX < canvas.width * 0.4) setupStick('move', t);
+                else if (t.clientY > canvas.height * 0.5) setupStick('atk', t);
+                else setupStick('ult', t);
             }
         });
 
+        function setupStick(type, t) {
+            sticks[type].active = true;
+            sticks[type].id = t.identifier;
+            sticks[type].bx = sticks[type].cx = t.clientX;
+            sticks[type].by = sticks[type].cy = t.clientY;
+        }
+
         canvas.addEventListener("touchmove", (e) => {
             for (let t of e.changedTouches) {
-                if (joystick.active && t.identifier === joystick.id) {
-                    joystick.currX = t.clientX; joystick.currY = t.clientY;
+                for (let key in sticks) {
+                    if (sticks[key].id === t.identifier) {
+                        sticks[key].cx = t.clientX;
+                        sticks[key].cy = t.clientY;
+                    }
                 }
             }
         });
 
         canvas.addEventListener("touchend", (e) => {
             for (let t of e.changedTouches) {
-                if (joystick.active && t.identifier === joystick.id) joystick.active = false;
+                for (let key in sticks) {
+                    if (sticks[key].id === t.identifier) {
+                        if(key === 'atk') performAttack(p1, sticks.atk);
+                        sticks[key].active = false;
+                        sticks[key].id = null;
+                    }
+                }
             }
         });
 
-        function fireBullet(screenX, screenY) {
-            // カメラ位置を考慮して弾の方向を計算
-            const worldTargetX = screenX - canvas.width/2 + player.x;
-            const worldTargetY = screenY - canvas.height/2 + player.y;
-            const angle = Math.atan2(worldTargetY - player.y, worldTargetX - player.x);
-            
-            bullets.push({ 
-                startX: player.x, startY: player.y,
-                x: player.x, y: player.y, 
-                angle: angle, speed: 12, range: BULLET_RANGE 
-            });
-            player.ammo--;
-        }
-
-        function checkWallCollision(x, y, size) {
-            for (let w of walls) {
-                if (w.type === 0 && x + size > w.x && x - size < w.x + w.w && y + size > w.y && y - size < w.y + w.h) {
-                    return true;
-                }
-            }
-            return false;
+        function performAttack(char, stick) {
+            if (char.ammo <= 0) return;
+            const angle = Math.atan2(stick.cy - stick.by, stick.cx - stick.bx);
+            // ソビエトの段階的革命論ロジックをここに実装
+            console.log("Attack step:", char.attackStep, "Angle:", angle);
+            char.ammo--;
+            char.attackStep = (char.attackStep % 3) + 1;
         }
 
         function update() {
-            // リロード処理
-            if (player.ammo < 3 && Date.now() - player.lastReload > RELOAD_TIME) {
-                player.ammo++;
-                player.lastReload = Date.now();
-            }
-
-            // 移動処理
-            if (joystick.active) {
-                const dx = joystick.currX - joystick.baseX;
-                const dy = joystick.currY - joystick.baseY;
-                const angle = Math.atan2(dy, dx);
-                const speed = Math.min(Math.sqrt(dx*dx + dy*dy) / 10, 4);
-                
-                let nextX = player.x + Math.cos(angle) * speed;
-                let nextY = player.y + Math.sin(angle) * speed;
-
-                // 壁判定
-                if (!checkWallCollision(nextX, player.y, player.size)) player.x = nextX;
-                if (!checkWallCollision(player.x, nextY, player.size)) player.y = nextY;
-            }
-
-            // 描画準備（カメラをプレイヤー中心に）
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.save();
-            ctx.translate(canvas.width/2 - player.x, canvas.height/2 - player.y);
-
-            // 地面（グリッド）
-            ctx.strokeStyle = "#333";
-            for(let i=0; i<=WORLD_SIZE; i+=100) {
-                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, WORLD_SIZE); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(WORLD_SIZE, i); ctx.stroke();
+            
+            // プレイヤー移動 & 衝突
+            if (sticks.move.active) {
+                let dx = sticks.move.cx - sticks.move.bx;
+                let dy = sticks.move.cy - sticks.move.by;
+                let angle = Math.atan2(dy, dx);
+                p1.x += Math.cos(angle) * p1.speed;
+                p1.y += Math.sin(angle) * p1.speed;
             }
 
-            // 壁の描画
+            // カメラ開始
+            ctx.save();
+            ctx.translate(canvas.width/2 - p1.x, canvas.height/2 - p1.y);
+
+            // 壁とステージ境界
             walls.forEach(w => {
-                ctx.fillStyle = w.color;
+                ctx.fillStyle = w.dest ? "#44aa44" : "#555";
                 ctx.fillRect(w.x, w.y, w.w, w.h);
             });
 
-            // 弾の更新と描画
-            bullets.forEach((b, i) => {
-                b.x += Math.cos(b.angle) * b.speed;
-                b.y += Math.sin(b.angle) * b.speed;
-                
-                let hitWall = walls.some(w => w.type === 0 && b.x > w.x && b.x < w.x + w.w && b.y > w.y && b.y < w.y + w.h);
-                let outRange = Math.sqrt((b.x - b.startX)**2 + (b.y - b.startY)**2) > b.range;
+            p1.draw();
+            enemies.forEach(e => e.draw());
 
-                if (hitWall || outRange) {
-                    bullets.splice(i, 1);
-                } else {
-                    ctx.fillStyle = "yellow";
-                    ctx.beginPath(); ctx.arc(b.x, b.y, 5, 0, Math.PI*2); ctx.fill();
-                }
-            });
-
-            // プレイヤー
-            ctx.fillStyle = player.color;
-            ctx.beginPath(); ctx.arc(player.x, player.y, player.size, 0, Math.PI*2); ctx.fill();
-            
             ctx.restore();
 
-            // UI (リロード表示)
-            ctx.fillStyle = "white";
-            ctx.font = "20px Arial";
-            ctx.fillText("AMMO: " + "●".repeat(player.ammo) + "○".repeat(3-player.ammo), 20, 40);
-            
-            // ジョイスティック描画
-            if (joystick.active) {
-                ctx.beginPath(); ctx.arc(joystick.baseX, joystick.baseY, 50, 0, Math.PI*2);
-                ctx.strokeStyle = "rgba(255,255,255,0.3)"; ctx.stroke();
+            // スティック描画
+            for(let key in sticks) {
+                if(sticks[key].active) {
+                    ctx.beginPath(); ctx.arc(sticks[key].bx, sticks[key].by, 40, 0, Math.PI*2);
+                    ctx.strokeStyle = "white"; ctx.stroke();
+                }
             }
 
             requestAnimationFrame(update);
