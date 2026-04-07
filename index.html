@@ -1,487 +1,262 @@
 <!DOCTYPE html>
-
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<title>Global Brawl</title>
-
-<style>
-
-body{
-margin:0;
-overflow:hidden;
-background:#000;
-font-family:sans-serif;
-color:white;
-}
-
-canvas{display:block}
-
-#menu{
-position:absolute;
-width:100%;
-height:100%;
-background:#000;
-display:flex;
-flex-direction:column;
-align-items:center;
-justify-content:center;
-}
-
-#chars{
-display:grid;
-grid-template-columns:repeat(3,120px);
-gap:10px;
-}
-
-.btn{
-padding:16px;
-background:#222;
-border:2px solid #555;
-border-radius:8px;
-cursor:pointer;
-text-align:center;
-}
-
-#countdown{
-position:absolute;
-top:50%;
-left:50%;
-transform:translate(-50%,-50%);
-font-size:80px;
-display:none;
-}
-
-#killLog{
-position:absolute;
-right:10px;
-top:10px;
-width:220px;
-font-size:14px;
-}
-
-#ultBtn{
-position:absolute;
-right:40px;
-bottom:40px;
-width:90px;
-height:90px;
-border-radius:50%;
-border:4px solid white;
-display:flex;
-align-items:center;
-justify-content:center;
-background:#111;
-}
-
-#stickBase{
-position:absolute;
-left:40px;
-bottom:40px;
-width:140px;
-height:140px;
-border-radius:50%;
-background:rgba(255,255,255,0.1);
-}
-
-#stick{
-position:absolute;
-left:70px;
-bottom:70px;
-width:80px;
-height:80px;
-border-radius:50%;
-background:rgba(255,255,255,0.3);
-}
-
-</style>
-
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Global Brawl - Pro Edition</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; touch-action: none; font-family: 'Arial', sans-serif; user-select: none; }
+        canvas { display: block; }
+        #ui { position: absolute; top:0; left:0; width:100%; height:100%; display:flex; justify-content:center; align-items:center; background:rgba(0,0,0,0.9); flex-direction:column; z-index:10; color:#fff;}
+        .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 20px; }
+        .btn { padding: 15px; background: #222; border: 2px solid #555; cursor: pointer; text-align: center; border-radius: 8px; color:white; font-size: 11px;}
+        #respawnUI { position: absolute; top:0; left:0; width:100%; height:100%; display:none; justify-content:center; align-items:center; background:rgba(200,0,0,0.4); z-index:20; color:#fff; flex-direction:column; }
+        .hidden { display: none !important; }
+    </style>
 </head>
-
 <body>
-
-<div id="menu">
-<h1>GLOBAL BRAWL</h1>
-<div id="chars"></div>
-</div>
-
-<div id="countdown"></div>
-<div id="killLog"></div>
-<div id="ultBtn">ULT</div>
-
-<div id="stickBase"></div>
-<div id="stick"></div>
-
-<canvas id="game"></canvas>
-
-<script>
-
-const canvas=document.getElementById("game")
-const ctx=canvas.getContext("2d")
-
-canvas.width=innerWidth
-canvas.height=innerHeight
-
-const WORLD={w:1200,h:1200}
-
-let player
-let enemies=[]
-let bullets=[]
-let killLogs=[]
-
-let camX=0
-let camY=0
-
-let state="menu"
-
-const CHAR={
-soviet:{hp:8000,spd:2.5,size:55,col:"#c00"},
-usa:{hp:4500,spd:5,size:40,col:"#346"},
-uk:{hp:4000,spd:6,size:35,col:"#048"},
-france:{hp:5000,spd:4,size:40,col:"#e33"},
-germany:{hp:5500,spd:5,size:40,col:"#333"},
-japan:{hp:4500,spd:6.5,size:38,col:"#fff"}
-}
-
-class Actor{
-
-constructor(x,y,type,team){
-
-this.x=x
-this.y=y
-this.type=type
-this.team=team
-
-this.hp=CHAR[type].hp
-this.maxHp=this.hp
-this.spd=CHAR[type].spd
-this.size=CHAR[type].size
-
-this.ult=0
-this.dead=false
-
-}
-
-draw(){
-
-if(this.dead)return
-
-ctx.beginPath()
-ctx.arc(this.x-camX,this.y-camY,this.size,0,Math.PI*2)
-ctx.fillStyle=CHAR[this.type].col
-ctx.fill()
-
-ctx.fillStyle="#0f0"
-ctx.fillRect(this.x-40-camX,this.y-this.size-20-camY,80*(this.hp/this.maxHp),6)
-
-}
-
-}
-
-class Bullet{
-
-constructor(x,y,ang,owner){
-
-this.x=x
-this.y=y
-this.ang=ang
-this.spd=14
-this.owner=owner
-this.life=120
-
-}
-
-update(){
-
-this.x+=Math.cos(this.ang)*this.spd
-this.y+=Math.sin(this.ang)*this.spd
-
-this.life--
-
-if(this.life<0)this.dead=true
-
-let tgts=this.owner.team==="p"?enemies:[player]
-
-for(let t of tgts){
-
-if(t.dead)continue
-
-let d=Math.hypot(this.x-t.x,this.y-t.y)
-
-if(d<t.size){
-
-t.hp-=400
-this.dead=true
-
-if(t.hp<=0){
-
-t.dead=true
-addKill(this.owner.type,t.type)
-
-}
-
-if(this.owner.team==="p")
-player.ult=Math.min(100,player.ult+10)
-
-}
-
-}
-
-}
-
-draw(){
-
-ctx.beginPath()
-ctx.arc(this.x-camX,this.y-camY,6,0,Math.PI*2)
-ctx.fillStyle="#fff"
-ctx.fill()
-
-}
-
-}
-
-function addKill(a,b){
-
-killLogs.unshift(a+" defeated "+b)
-if(killLogs.length>6)killLogs.pop()
-
-let div=document.getElementById("killLog")
-div.innerHTML=""
-
-killLogs.forEach(k=>{
-let d=document.createElement("div")
-d.innerText=k
-div.appendChild(d)
-})
-
-}
-
-function fire(actor,ang){
-
-bullets.push(new Bullet(actor.x,actor.y,ang,actor))
-
-}
-
-function useUlt(){
-
-if(player.ult<100)return
-player.ult=0
-
-for(let e of enemies){
-
-if(e.dead)continue
-e.hp-=1500
-
-if(e.hp<=0){
-e.dead=true
-addKill(player.type,e.type)
-}
-
-}
-
-}
-
-function ai(){
-
-for(let e of enemies){
-
-if(e.dead)continue
-
-let ang=Math.atan2(player.y-e.y,player.x-e.x)
-
-e.x+=Math.cos(ang)*e.spd*0.6
-e.y+=Math.sin(ang)*e.spd*0.6
-
-if(Math.random()<0.02)
-fire(e,ang)
-
-}
-
-}
-
-let moveX=0
-let moveY=0
-
-function update(){
-
-player.x+=moveX*player.spd
-player.y+=moveY*player.spd
-
-player.x=Math.max(0,Math.min(WORLD.w,player.x))
-player.y=Math.max(0,Math.min(WORLD.h,player.y))
-
-ai()
-
-bullets.forEach(b=>b.update())
-bullets=bullets.filter(b=>!b.dead)
-
-}
-
-function draw(){
-
-ctx.clearRect(0,0,canvas.width,canvas.height)
-
-camX=player.x-canvas.width/2
-camY=player.y-canvas.height/2
-
-player.draw()
-
-enemies.forEach(e=>e.draw())
-bullets.forEach(b=>b.draw())
-
-drawUlt()
-
-}
-
-function drawUlt(){
-
-let x=canvas.width-85
-let y=canvas.height-85
-let r=45
-
-ctx.beginPath()
-ctx.arc(x,y,r,0,Math.PI*2)
-ctx.strokeStyle="#444"
-ctx.lineWidth=6
-ctx.stroke()
-
-let p=player.ult/100
-
-ctx.beginPath()
-ctx.arc(x,y,r,-Math.PI/2,-Math.PI/2+Math.PI*2*p)
-ctx.strokeStyle="#ff0"
-ctx.lineWidth=6
-ctx.stroke()
-
-ctx.fillStyle="#fff"
-ctx.textAlign="center"
-ctx.fillText("ULT",x,y+5)
-
-}
-
-function loop(){
-
-if(state==="play"){
-update()
-draw()
-}
-
-requestAnimationFrame(loop)
-
-}
-
-function start(type){
-
-document.getElementById("menu").style.display="none"
-
-const cd=document.getElementById("countdown")
-cd.style.display="block"
-
-let t=3
-cd.innerText=t
-
-let timer=setInterval(()=>{
-
-t--
-
-if(t>0){
-cd.innerText=t
-}else{
-
-cd.innerText="START"
-
-clearInterval(timer)
-
-setTimeout(()=>{
-
-cd.style.display="none"
-
-player=new Actor(600,600,type,"p")
-
-enemies=[
-new Actor(900,700,"germany","e"),
-new Actor(800,900,"soviet","e"),
-new Actor(700,900,"usa","e")
-]
-
-state="play"
-loop()
-
-},800)
-
-}
-
-},1000)
-
-}
-
-function createMenu(){
-
-let div=document.getElementById("chars")
-
-for(let k in CHAR){
-
-let b=document.createElement("div")
-b.className="btn"
-b.innerText=k
-b.onclick=()=>start(k)
-
-div.appendChild(b)
-
-}
-
-}
-
-canvas.addEventListener("mousedown",e=>{
-
-let ang=Math.atan2(e.clientY-canvas.height/2,e.clientX-canvas.width/2)
-fire(player,ang)
-
-})
-
-document.getElementById("ultBtn").onclick=useUlt
-
-/* 仮想スティック */
-
-let stick=document.getElementById("stick")
-let base=document.getElementById("stickBase")
-
-base.addEventListener("touchmove",e=>{
-
-let t=e.touches[0]
-
-let rect=base.getBoundingClientRect()
-
-let x=t.clientX-(rect.left+70)
-let y=t.clientY-(rect.top+70)
-
-let d=Math.hypot(x,y)
-
-if(d>60){
-
-x*=60/d
-y*=60/d
-
-}
-
-stick.style.transform=`translate(${x}px,${y}px)`
-
-moveX=x/60
-moveY=y/60
-
-})
-
-base.addEventListener("touchend",()=>{
-
-stick.style.transform="translate(0px,0px)"
-moveX=0
-moveY=0
-
-})
-
-createMenu()
-
-</script>
-
+    <div id="ui">
+        <h1 style="color:#ffcc00;">GLOBAL BRAWL: PRO</h1>
+        <div class="grid" id="chars"></div>
+    </div>
+
+    <div id="respawnUI">
+        <h2 style="font-size:48px;">DEFEATED</h2>
+        <p id="respawnTimer">Respawning in 3...</p>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+        const WORLD = { w: 4000, h: 4000 };
+        let state = 'home', player, enemies = [], walls = [], entities = [], areas = [];
+        let cam = { x: 0, y: 0 };
+
+        const C = {
+            soviet:  { hp: 8000, spd: 3, size: 55, col: "#c00", sym: "★", dmg: 700 },
+            usa:     { hp: 4500, spd: 5, size: 45, col: "#336", sym: "USA", dmg: 400 },
+            uk:      { hp: 4000, spd: 6, size: 30, col: "#027", sym: "UK", dmg: 900 },
+            france:  { hp: 5000, spd: 4, size: 40, col: "#e23", sym: "FR", dmg: 600 },
+            germany: { hp: 5500, spd: 5, size: 40, col: "#333", sym: "✠", dmg: 500 },
+            japan:   { hp: 4500, spd: 6.5, size: 35, col: "#fff", sym: "☉", dmg: 1000 },
+            italy:   { hp: 5000, spd: 4.5, size: 35, col: "#094", sym: "🍕", dmg: 550 },
+            china:   { hp: 6000, spd: 4, size: 45, col: "#e12", sym: "五", dmg: 450 },
+            canada:  { hp: 6500, spd: 3, size: 45, col: "#f00", sym: "🍁", dmg: 500 },
+            finland: { hp: 4800, spd: 5.5, size: 35, col: "#038", sym: "❄", dmg: 1200 }
+        };
+
+        function init() {
+            const grid = document.getElementById("chars");
+            Object.keys(C).forEach(k => {
+                let b = document.createElement("div"); b.className = "btn";
+                b.innerHTML = `<b>${C[k].sym}</b><br>${k}`;
+                b.onclick = () => start(k); grid.appendChild(b);
+            });
+        }
+
+        function start(type) {
+            document.getElementById("ui").classList.add("hidden");
+            spawnPlayer(type);
+            enemies = [new Actor(1500, 1800, 'e', 'usa'), new Actor(1500, 2200, 'e', 'germany'), new Actor(2000, 2000, 'e', 'soviet')];
+            walls = [new Wall(1000, 1000, 100, 2000, false), new Wall(2000, 1500, 100, 1000, true)];
+            state = 'play'; resize(); loop();
+        }
+
+        function spawnPlayer(type) {
+            player = new Actor(500, 2000, 'p', type);
+            cam.x = player.x; cam.y = player.y;
+            document.getElementById("respawnUI").style.display = "none";
+        }
+
+        function handleDeath() {
+            document.getElementById("respawnUI").style.display = "flex";
+            let sec = 3;
+            const timer = setInterval(() => {
+                sec--;
+                document.getElementById("respawnTimer").innerText = `Respawning in ${sec}...`;
+                if(sec <= 0) {
+                    clearInterval(timer);
+                    spawnPlayer(player.type);
+                }
+            }, 1000);
+        }
+
+        window.addEventListener('resize', resize);
+        function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+
+        class Wall {
+            constructor(x,y,w,h,brk,hp=2000) { this.x=x; this.y=y; this.w=w; this.h=h; this.brk=brk; this.hp=hp; }
+            draw() { if(this.hp<=0) return; ctx.fillStyle = this.brk ? "#8b4513" : "#555"; ctx.fillRect(this.x, this.y, this.w, this.h); }
+        }
+
+        class Actor {
+            constructor(x,y,team,type) {
+                this.x=x; this.y=y; this.team=team; this.type=type;
+                this.hp=C[type].hp; this.maxHp=this.hp; this.spd=C[type].spd; this.size=C[type].size;
+                this.ammo=3; this.reloadProgress=0; this.reloadTime=100;
+                this.dead=false; this.state=null;
+            }
+            update(mvAng, isMv) {
+                if(this.dead) return;
+                if(this.ammo < 3) {
+                    this.reloadProgress++;
+                    if(this.reloadProgress >= this.reloadTime) { this.ammo++; this.reloadProgress = 0; }
+                }
+                if(this.state && this.state.t === 'jp_dash') {
+                    this.x += Math.cos(this.state.ang)*30; this.y += Math.sin(this.state.ang)*30;
+                    if(Date.now() > this.state.end) {
+                        areas.push(new Area(this.x, this.y, 'slash', this, this.state.ang, 200, 1200));
+                        this.state = null;
+                    }
+                    return;
+                }
+                if(isMv) {
+                    let nx=this.x+Math.cos(mvAng)*this.spd; let ny=this.y+Math.sin(mvAng)*this.spd;
+                    if(!this.colWall(nx,this.y)) this.x=nx; if(!this.colWall(this.x,ny)) this.y=ny;
+                }
+            }
+            colWall(nx,ny) {
+                for(let w of walls) if(w.hp>0 && nx+this.size*0.5 > w.x && nx-this.size*0.5 < w.x+w.w && ny+this.size*0.5 > w.y && ny-this.size*0.5 < w.y+w.h) return true;
+                return false;
+            }
+            draw() {
+                if(this.dead) return;
+                ctx.save(); ctx.translate(this.x,this.y);
+                ctx.beginPath(); ctx.arc(0,0,this.size,0,Math.PI*2);
+                ctx.fillStyle=C[this.type].col; ctx.fill();
+                ctx.strokeStyle=this.team==='p'?"#0ff":"#f00"; ctx.lineWidth=3; ctx.stroke();
+                ctx.fillStyle="#fff"; ctx.font="bold 18px Arial"; ctx.textAlign="center"; ctx.fillText(C[this.type].sym,0,7);
+                ctx.restore();
+
+                let bx=this.x-40, by=this.y-this.size-25;
+                ctx.fillStyle="#000"; ctx.fillRect(bx,by,80,8);
+                ctx.fillStyle=this.team==='p'?"#2ecc71":"#e74c3c"; ctx.fillRect(bx,by,80*(this.hp/this.maxHp),8);
+                if(this.team==='p') {
+                    for(let i=0; i<3; i++) {
+                        let sx = bx + (i * 28);
+                        ctx.fillStyle = (this.ammo > i) ? "#f1c40f" : "#444";
+                        ctx.fillRect(sx, by+10, 24, 6);
+                        if(this.ammo === i) ctx.fillRect(sx, by+10, 24 * (this.reloadProgress/this.reloadTime), 6);
+                    }
+                }
+            }
+        }
+
+        class Entity {
+            constructor(x,y,ang,spd,rng,dmg,owner) {
+                this.x=x; this.y=y; this.sx=x; this.sy=y; this.ang=ang; this.spd=spd; this.rng=rng; this.dmg=dmg; this.owner=owner; this.active=true;
+            }
+            update() {
+                this.x+=Math.cos(this.ang)*this.spd; this.y+=Math.sin(this.ang)*this.spd;
+                if(Math.hypot(this.x-this.sx,this.y-this.sy)>this.rng) this.active=false;
+                let tgts=this.owner.team==='p'?enemies:[player];
+                for(let t of tgts) if(!t.dead && Math.hypot(this.x-t.x,this.y-t.y) < t.size + 25) {
+                    t.hp-=this.dmg; this.active=false;
+                    if(t.hp<=0) { t.dead=true; if(t===player) handleDeath(); }
+                }
+            }
+            draw() {
+                ctx.fillStyle="#ff0"; ctx.beginPath(); ctx.arc(this.x,this.y,12,0,Math.PI*2); ctx.fill();
+            }
+        }
+
+        class Area {
+            constructor(x,y,type,owner,ang,rng,dmg) { this.x=x; this.y=y; this.owner=owner; this.ang=ang; this.rng=rng; this.dmg=dmg; this.birth=Date.now(); this.active=true; this.hit=new Set();}
+            update() {
+                if(Date.now()-this.birth > 200) { this.active=false; return; }
+                let tgts=this.owner.team==='p'?enemies:[player];
+                for(let t of tgts) if(!t.dead && !this.hit.has(t) && Math.hypot(this.x-t.x,this.y-t.y)<this.rng) {
+                    t.hp-=this.dmg; this.hit.add(t);
+                    if(t.hp<=0) { t.dead=true; if(t===player) handleDeath(); }
+                }
+            }
+            draw() {
+                ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.ang);
+                ctx.fillStyle="rgba(255,255,255,0.4)"; ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,this.rng,-Math.PI/3,Math.PI/3); ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function fire(act, ang) {
+            if(act.dead || act.ammo <= 0) return;
+            if(act.type === 'japan') {
+                act.state = {t:'jp_dash', end:Date.now()+180, ang:ang};
+            } else {
+                entities.push(new Entity(act.x, act.y, ang, 22, 700, C[act.type].dmg, act));
+            }
+            act.ammo--;
+        }
+
+        let sticks = { m:{a:false,bx:0,by:0,cx:0,cy:0,id:null}, a:{a:false,bx:0,by:0,cx:0,cy:0,id:null} };
+        canvas.addEventListener("touchstart", e => {
+            for(let t of e.changedTouches) {
+                if(t.clientX < innerWidth/2) sticks.m={a:true,bx:t.clientX,by:t.clientY,cx:t.clientX,cy:t.clientY,id:t.identifier};
+                else sticks.a={a:true,bx:t.clientX,by:t.clientY,cx:t.clientX,cy:t.clientY,id:t.identifier};
+            }
+        });
+        canvas.addEventListener("touchmove", e => {
+            for(let t of e.changedTouches) {
+                for(let k in sticks) if(sticks[k].id===t.identifier) { sticks[k].cx=t.clientX; sticks[k].cy=t.clientY; }
+            }
+        });
+        canvas.addEventListener("touchend", e => {
+            for(let t of e.changedTouches) {
+                for(let k in sticks) if(sticks[k].id===t.identifier) {
+                    if(k==='a' && !player.dead) fire(player, Math.atan2(sticks.a.cy-sticks.a.by, sticks.a.cx-sticks.a.bx));
+                    sticks[k].a=false; sticks[k].id=null;
+                }
+            }
+        });
+
+        function loop() {
+            if(state==='play') {
+                ctx.clearRect(0,0,canvas.width,canvas.height);
+                if(!player.dead) { cam.x += (player.x - cam.x)*0.1; cam.y += (player.y - cam.y)*0.1; }
+                
+                ctx.save(); ctx.translate(canvas.width/2-cam.x, canvas.height/2-cam.y);
+                ctx.fillStyle="#111"; ctx.fillRect(0,0,WORLD.w,WORLD.h);
+                
+                // 日本のエイムガイド描画
+                if(sticks.a.a && player.type === 'japan' && !player.dead) {
+                    let ang = Math.atan2(sticks.a.cy-sticks.a.by, sticks.a.cx-sticks.a.bx);
+                    ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+                    ctx.lineWidth = 40; ctx.lineCap = "round";
+                    ctx.beginPath(); ctx.moveTo(player.x, player.y);
+                    ctx.lineTo(player.x + Math.cos(ang)*400, player.y + Math.sin(ang)*400); // 踏み込み予測距離
+                    ctx.stroke();
+                }
+
+                player.update(Math.atan2(sticks.m.cy-sticks.m.by, sticks.m.cx-sticks.m.bx), sticks.m.a);
+                enemies.forEach(e => {
+                    if(!e.dead) {
+                        let a=Math.atan2(player.y-e.y, player.x-e.x);
+                        e.update(a, Math.hypot(player.x-e.x, player.y-e.y)>350);
+                        if(Math.random()<0.01) fire(e, a);
+                    }
+                });
+
+                entities.forEach(e=>e.update()); entities=entities.filter(e=>e.active);
+                areas.forEach(a=>a.update()); areas=areas.filter(a=>a.active);
+                walls.forEach(w=>w.draw());
+                player.draw(); enemies.forEach(e=>e.draw()); entities.forEach(e=>e.draw()); areas.forEach(a=>a.draw());
+                ctx.restore();
+                
+                drawStick(120, canvas.height-120, sticks.m, "#fff");
+                drawStick(canvas.width-120, canvas.height-120, sticks.a, "#ff0");
+            }
+            requestAnimationFrame(loop);
+        }
+
+        function drawStick(x,y,s,c) {
+            ctx.beginPath(); ctx.arc(x,y,65,0,Math.PI*2); ctx.strokeStyle=c; ctx.lineWidth=3; ctx.stroke();
+            if(s.a){
+                let a=Math.atan2(s.cy-s.by,s.cx-s.bx); let d=Math.min(65,Math.hypot(s.cx-s.bx,s.cy-s.by));
+                ctx.beginPath(); ctx.arc(x+Math.cos(a)*d,y+Math.sin(a)*d,30,0,Math.PI*2); ctx.fillStyle="rgba(255,255,255,0.4)"; ctx.fill();
+            }
+        }
+        init();
+    </script>
 </body>
 </html>
