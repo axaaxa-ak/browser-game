@@ -3,35 +3,77 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Global Brawl - All Characters</title>
+    <title>Global Brawl - Final</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; touch-action: none; font-family: 'Courier New', sans-serif; user-select: none; }
+        body { margin: 0; overflow: hidden; background: #000; touch-action: none; font-family: 'Arial', sans-serif; user-select: none; }
         canvas { display: block; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.8); color: white; flex-direction: column; z-index: 10; }
+        .char-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 20px; }
+        .char-btn { padding: 15px; background: #333; border: 2px solid #555; cursor: pointer; text-align: center; border-radius: 8px; }
+        .char-btn:hover { background: #555; border-color: #fff; }
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
+    <div id="ui-layer">
+        <h1>GLOBAL BRAWL</h1>
+        <p>キャラクターを選択してスタート</p>
+        <div class="char-grid" id="charGrid"></div>
+    </div>
     <canvas id="gameCanvas"></canvas>
+
     <script>
         const canvas = document.getElementById("gameCanvas");
         const ctx = canvas.getContext("2d");
+        let gameState = 'home';
+        let player;
+        let enemies = [];
+        let bullets = [];
+        let walls = [];
+        let gameObjects = [];
 
-        // --- ゲーム設定 ---
-        const WORLD = { w: 4000, h: 4000, grid: 100 };
-        const RESPAWN_MS = 5000;
-
-        // 全キャラ詳細データ (バランス調整済み)
+        const WORLD = { w: 3000, h: 3000, grid: 100 };
         const CHAR_CONFIG = {
-            soviet:  { hp: 8000, speed: 2.8, size: 55, color: "#cc0000", symbol: "★", reload: 2200, ultDmg: 200 }, // ULT botdmg
-            usa:     { hp: 4500, speed: 4.5, size: 40, color: "#3c3b6e", symbol: "|||", reload: 1800, range: 600, dmg: 250 },
-            uk:      { hp: 4000, speed: 5.0, size: 25, color: "#00247d", symbol: "†", reload: 2000, range: 700, dmg: 1500 },
-            france:  { hp: 5000, speed: 3.5, size: 35, color: "#ed2939", symbol: "‡", reload: 1700, range: 250, dmg: 900, trenchHp: 2000 },
-            germany: { hp: 5500, speed: 4.2, size: 35, color: "#ffce00", symbol: "卐", reload: 1500, range: 450, dmg: 150, tankHpMult: 1.5 },
-            japan:   { hp: 4500, speed: 5.2, size: 35, color: "#ffffff", symbol: "☉", reload: 1000, range: 300, dmg: [1200, 800], buffMults: [1.5, 1.65, 1.5] }, // 攻, 速, リ
-            italy:   { hp: 5000, speed: 3.5, size: 35, color: "#009246", symbol: "🍕", reload: 5000, range: 150, dmg: 200 },
-            china:   { hp: 6000, speed: 3.5, size: 40, color: "#ee1c25", symbol: "☆", reload: 1800, range: 400, dmg: 300 },
-            canada:  { hp: 6500, speed: 2.8, size: 40, color: "#ff0000", symbol: "🍁", reload: 2200, range: 550, dmg: 400 },
-            finland: { hp: 4800, speed: 4.5, size: 35, color: "#003580", symbol: "❄", reload: 2000, range: 800, dmg: 1800, blazeDmg: 100 }
+            soviet:  { name: "ソビエト", hp: 8000, speed: 2.8, size: 50, color: "#cc0000", symbol: "★", reload: 2000, dmg: 800 },
+            usa:     { name: "アメリカ", hp: 4500, speed: 4.5, size: 35, color: "#3c3b6e", symbol: "☆", reload: 1500, dmg: 250 },
+            uk:      { name: "イギリス", hp: 4000, speed: 4.8, size: 30, color: "#00247d", symbol: "✠", reload: 1800, dmg: 1500 },
+            france:  { name: "フランス", hp: 5000, speed: 3.5, size: 35, color: "#ed2939", symbol: "🇫🇷", reload: 1700, dmg: 900 },
+            germany: { name: "ドイツ", hp: 5500, speed: 4.0, size: 35, color: "#333", symbol: "✠", reload: 1500, dmg: 150 },
+            japan:   { name: "日本", hp: 4500, speed: 5.0, size: 35, color: "#fff", symbol: "☉", reload: 1000, dmg: 1000 },
+            italy:   { name: "イタリア", hp: 5000, speed: 3.5, size: 35, color: "#009246", symbol: "🍕", reload: 4000, dmg: 200 },
+            china:   { name: "中国", hp: 6000, speed: 3.5, size: 40, color: "#ee1c25", symbol: "五", reload: 1800, dmg: 300 },
+            canada:  { name: "カナダ", hp: 6500, speed: 3.0, size: 40, color: "#ff0000", symbol: "🍁", reload: 2000, dmg: 400 },
+            finland: { name: "フィンランド", hp: 4800, speed: 4.5, size: 35, color: "#003580", symbol: "❄", reload: 2000, dmg: 1800 }
         };
+
+        // --- 初期化 ---
+        function initHome() {
+            const grid = document.getElementById("charGrid");
+            Object.keys(CHAR_CONFIG).forEach(key => {
+                const btn = document.createElement("div");
+                btn.className = "char-btn";
+                btn.innerHTML = `${CHAR_CONFIG[key].symbol}<br><small>${CHAR_CONFIG[key].name}</small>`;
+                btn.onclick = () => startGame(key);
+                grid.appendChild(btn);
+            });
+        }
+
+        function startGame(charKey) {
+            document.getElementById("ui-layer").classList.add("hidden");
+            player = new Actor(500, 1500, "player", charKey);
+            enemies = [
+                new Actor(2500, 1000, "enemy", "usa"),
+                new Actor(2500, 2000, "enemy", "germany")
+            ];
+            // AIのスピードを少し下方修正
+            enemies.forEach(e => e.speed *= 0.8);
+            
+            walls = [
+                new Wall(1000, 500, 100, 2000, 0),
+                new Wall(1500, 1200, 500, 100, 2)
+            ];
+            gameState = 'playing';
+        }
 
         function resize() {
             canvas.width = window.innerWidth;
@@ -40,175 +82,71 @@
         window.addEventListener('resize', resize);
         resize();
 
-        // --- クラス定義 ---
-
-        class Wall {
-            constructor(x, y, w, h, type, hp=Infinity) {
-                this.x = x; this.y = y; this.w = w; this.h = h;
-                this.type = type; // 0:不可, 1:弾通, 2:壊れる, 3:塹壕
-                this.hp = hp; this.alive = true;
-            }
-            draw() {
-                if (!this.alive) return;
-                ctx.fillStyle = this.type === 0 ? "#444" : (this.type === 1 ? "rgba(100,200,100,0.4)" : (this.type===3?"#6b4e31":"#8b4513"));
-                ctx.strokeStyle = "#000"; ctx.fillRect(this.x, this.y, this.w, this.h); ctx.strokeRect(this.x, this.y, this.w, this.h);
-            }
-        }
-
-        class Bullet {
-            constructor(x, y, angle, speed, range, dmg, owner, color="yellow", size=6, special=null) {
-                this.x = x; this.y = y; this.sx = x; this.sy = y;
-                this.angle = angle; this.speed = speed; this.range = range;
-                this.dmg = dmg; this.owner = owner; this.color = color; this.size = size;
-                this.special = special; // {type: 'bomb', tX, tY} など
-                this.active = true;
-            }
-            update() {
-                this.x += Math.cos(this.angle) * this.speed;
-                this.y += Math.sin(this.angle) * this.speed;
-                if (Math.hypot(this.x - this.sx, this.y - this.sy) > this.range) this.active = false;
-                
-                if (this.special && this.special.type === 'bomb') {
-                     if (Math.hypot(this.x - this.special.tX, this.y - this.special.tY) < this.speed) {
-                         this.explode(); this.active = false;
-                     }
-                }
-
-                for (let w of walls) {
-                    if (!w.alive || w.type === 1) continue;
-                    if (this.x > w.x && this.x < w.x+w.w && this.y > w.y && this.y < w.y+w.h) {
-                        if (w.type === 2 || w.type === 3) { w.hp -= this.dmg; if(w.hp<=0)w.alive=false; }
-                        this.active = false;
-                    }
-                }
-            }
-            explode() {
-                bullets.push(new Bullet(this.x, this.y, 0, 0, 10, this.dmg, this.owner, "orange", 50, {type: 'explosion'}));
-            }
-        }
-
-        // 特別なオブジェクト（bot, 空爆, アイテム, 範囲エフェクト）
-        class GameObject {
-            constructor(x, y, type, owner, data) {
-                this.x = x; this.y = y; this.type = type; this.owner = owner; this.data = data;
-                this.alive = true; this.birthT = Date.now();
-            }
-            update() {
-                const now = Date.now();
-                if (this.type === 'bot') {
-                     let target = player.dead ? null : player; // Botはプレイヤーのみ狙う
-                     if(target) {
-                         let angle = Math.atan2(target.y - this.y, target.x - this.x);
-                         let nx = this.x + Math.cos(angle) * 3; let ny = this.y + Math.sin(angle) * 3;
-                         if(!isCollidingWall(nx, ny, 20)) { this.x = nx; this.y = ny; }
-                         if(Math.hypot(target.x-this.x, target.y-this.y) < 30 && now - this.data.lastAtk > 1000) {
-                             target.hp -= CHAR_CONFIG.soviet.ultDmg; this.data.lastAtk = now;
-                         }
-                     }
-                     if(now - this.birthT > 10000) this.alive = false; // 10秒で消滅
-                } else if (this.type === 'air空爆') {
-                    if(now - this.birthT > 2000) { // 2秒後に爆撃開始
-                        for(let i=0; i<5; i++) {
-                            let r = Math.random() * 200; let a = Math.random() * Math.PI*2;
-                            bullets.push(new Bullet(this.x + Math.cos(a)*r, this.y + Math.sin(a)*r, 0, 0, 10, 500, this.owner, "orange", 30));
-                        }
-                        this.alive = false;
-                    }
-                } else if (this.type === 'item') {
-                    [player, ...enemies].forEach(a => {
-                        if(!a.dead && Math.hypot(a.x-this.x, a.y-this.y) < a.size) {
-                            a.hp = Math.min(a.maxHp, a.hp + 1000); this.alive = false;
-                        }
-                    });
-                    if(now - this.birthT > 15000) this.alive = false;
-                } else if (this.type === 'blaze吹雪') {
-                    enemies.concat(player).forEach(a => {
-                        if(!a.dead && Math.hypot(a.x-this.x, a.y-this.y) < this.data.r) {
-                            a.hp -= CHAR_CONFIG.finland.blazeDmg / 60; // 毎フレームダメージ
-                        }
-                    });
-                    if(now - this.birthT > 8000) this.alive = false;
-                }
-            }
-            draw() {
-                ctx.save(); ctx.translate(this.x, this.y);
-                if (this.type === 'bot') { ctx.fillStyle="#cc0000"; ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.fill(); ctx.fillStyle="#fff"; ctx.fillText("★", 0, 5); }
-                else if (this.type === 'air空爆') { ctx.strokeStyle="red"; ctx.lineWidth=3; ctx.setLineDash([10,5]); ctx.beginPath(); ctx.arc(0,0,200,0,Math.PI*2); ctx.stroke(); ctx.setLineDash([]); }
-                else if (this.type === 'item') { ctx.fillStyle="#44ff44"; ctx.fillRect(-20,-20,40,40); ctx.fillStyle="#fff"; ctx.fillText("✚", 0, 10); }
-                else if (this.type === 'blaze吹雪') { ctx.fillStyle="rgba(200,220,255,0.3)"; ctx.beginPath(); ctx.arc(0,0,this.data.r,0,Math.PI*2); ctx.fill(); }
-                ctx.restore();
-            }
-        }
-
+        // --- クラス ---
         class Actor {
             constructor(x, y, team, type) {
                 this.x = x; this.y = y; this.team = team; this.type = type;
-                const conf = CHAR_CONFIG[type];
-                this.hp = conf.hp; this.maxHp = conf.hp;
-                this.speed = conf.speed; this.size = conf.size;
-                this.ammo = type==='italy'?1:3; this.maxAmmo = type==='italy'?1:3; this.ult = 0;
-                this.lastReload = Date.now(); this.dead = false; this.deathT = 0;
-                this.atkStep = 0; this.timers = {}; // 各種状態タイマー
+                const c = CHAR_CONFIG[type];
+                this.hp = c.hp; this.maxHp = c.hp;
+                this.speed = c.speed; this.size = c.size;
+                this.ammo = 3; this.maxAmmo = (type==='italy'?1:3);
+                this.ult = 0;
+                this.lastReload = Date.now();
+                this.lastCombat = Date.now(); // 自然回復用
+                this.dead = false; this.deathT = 0;
             }
 
             update(angle, moving) {
                 const now = Date.now();
                 if (this.dead) {
-                    let respawnT = RESPAWN_MS;
-                    if(this.type === 'japan' && this.timers.buff) respawnT -= 2000; // 日本ULT中
-                    if (now - this.deathT > respawnT) {
-                        this.dead = false; this.hp = this.maxHp; this.x = (this.team==="player"?500:3500); this.timers={};
+                    if (now - this.deathT > 5000) {
+                        this.dead = false; this.hp = this.maxHp; this.x = (this.team==='player'?500:2500);
                     }
                     return;
                 }
 
-                // ドイツ戦車化解除
-                if(this.timers.tank && now > this.timers.tank) { this.timers.tank=null; this.speed=CHAR_CONFIG.germany.speed; this.maxHp=CHAR_CONFIG.germany.hp; this.hp=Math.min(this.hp, this.maxHp); }
-                // 中国透明化解除
-                if(this.timers.inv && now > this.timers.inv) this.timers.inv=null;
-                // 日本/フィンランドバフ解除
-                if(this.timers.buff && now > this.timers.buff) this.timers.buff=null;
+                // 自然回復: 3秒間ダメージも攻撃もなければ、秒間5%回復
+                if (now - this.lastCombat > 3000 && this.hp < this.maxHp) {
+                    this.hp = Math.min(this.maxHp, this.hp + (this.maxHp * 0.002));
+                }
 
                 // リロード
-                let reloadSpd = CHAR_CONFIG[this.type].reload;
-                if(this.type === 'japan' && this.timers.buff) reloadSpd /= CHAR_CONFIG.japan.buffMults[2];
-                if (this.ammo < this.maxAmmo && now - this.lastReload > reloadSpd) {
+                if (this.ammo < this.maxAmmo && now - this.lastReload > CHAR_CONFIG[this.type].reload) {
                     this.ammo++; this.lastReload = now;
                 }
 
-                // イタリア通常攻撃継続
-                if(this.type === 'italy' && this.timers.pizza && now < this.timers.pizza) {
-                    if(now - this.timers.lastPizzaDmg > 250) {
-                        enemies.concat(player).forEach(a => { if(!a.dead && a.team!==this.team && Math.hypot(a.x-this.x,a.y-this.y)<100) a.hp-=200; });
-                        this.timers.lastPizzaDmg = now;
-                    }
-                }
-
                 if (moving) {
-                    let spd = this.speed;
-                    if(this.type === 'japan' && this.timers.buff) spd *= CHAR_CONFIG.japan.buffMults[1];
-                    let nx = this.x + Math.cos(angle) * spd; let ny = this.y + Math.sin(angle) * spd;
-                    if (!isCollidingWall(nx, this.y, this.size)) this.x = nx;
-                    if (!isCollidingWall(this.x, ny, this.size)) this.y = ny;
-                    this.x = Math.max(this.size, Math.min(WORLD.w - this.size, this.x)); this.y = Math.max(this.size, Math.min(WORLD.h - this.size, this.y));
+                    let nx = this.x + Math.cos(angle) * this.speed;
+                    let ny = this.y + Math.sin(angle) * this.speed;
+                    // 衝突判定。少し余裕を持たせて「動けなくなる」のを防ぐ
+                    if (!this.isColliding(nx, this.y)) this.x = nx;
+                    if (!this.isColliding(this.x, ny)) this.y = ny;
+                    this.x = Math.max(this.size, Math.min(WORLD.w - this.size, this.x));
+                    this.y = Math.max(this.size, Math.min(WORLD.h - this.size, this.y));
                 }
             }
 
+            isColliding(nx, ny) {
+                for (let w of walls) {
+                    if (!w.alive || w.type === 1) continue;
+                    if (nx + this.size*0.4 > w.x && nx - this.size*0.4 < w.x + w.w &&
+                        ny + this.size*0.4 > w.y && ny - this.size*0.4 < w.y + w.h) return true;
+                }
+                return false;
+            }
+
             draw() {
-                if (this.dead || (this.timers.inv && this.team!=='player')) return; // 透明化敵は描画しない
-                const conf = CHAR_CONFIG[this.type];
-                
-                // 国マーク
+                if (this.dead) return;
                 ctx.save(); ctx.translate(this.x, this.y);
                 ctx.beginPath(); ctx.arc(0, 0, this.size, 0, Math.PI*2);
-                ctx.fillStyle = this.timers.buff?"rgba(255,100,100,0.5)":(this.timers.inv?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.2)"); ctx.fill();
-                ctx.fillStyle = conf.color; ctx.font = "bold 20px Arial"; ctx.textAlign = "center"; ctx.fillText(conf.symbol, 0, 7);
-                if(this.timers.tank) { ctx.lineWidth=5; ctx.strokeStyle="gold"; ctx.stroke(); }
+                ctx.fillStyle = CHAR_CONFIG[this.type].color; ctx.fill();
+                ctx.fillStyle = "#fff"; ctx.font = "bold 20px Arial"; ctx.textAlign = "center";
+                ctx.fillText(CHAR_CONFIG[this.type].symbol, 0, 7);
                 ctx.restore();
 
-                // 頭上UI
-                ctx.fillStyle = "white"; ctx.font = "bold 14px Arial"; ctx.textAlign = "center";
-                ctx.fillText(`HP: ${Math.floor(this.hp)}`, this.x, this.y - this.size - 20);
+                // UI
+                ctx.fillStyle = "white"; ctx.font = "14px Arial"; ctx.textAlign = "center";
+                ctx.fillText(Math.floor(this.hp), this.x, this.y - this.size - 20);
                 for(let i=0; i<this.maxAmmo; i++) {
                     ctx.fillStyle = i < this.ammo ? "#ffee00" : "#555";
                     ctx.fillRect(this.x - 25 + i*18, this.y - this.size - 10, 15, 5);
@@ -216,29 +154,48 @@
             }
         }
 
-        // --- インスタンス生成 ---
-        let player = new Actor(500, 2000, "player", "soviet");
-        let enemies = [
-            new Actor(3500, 1500, "enemy", "usa"),
-            new Actor(3500, 2500, "enemy", "germany"),
-            new Actor(3500, 2000, "enemy", "japan")
-        ];
-        let bullets = []; let walls = []; let gameObjects = [];
-
-        // ステージ作成（適度に配置）
-        for(let i=0; i<10; i++) {
-            walls.push(new Wall(1000 + i*100, 500 + i*100, 100, 100, Math.random()<0.3?2:0)); // 堅固/壊れる
-            walls.push(new Wall(3000 - i*100, 1500 + i*100, 100, 60, 1)); // 柵
+        class Wall {
+            constructor(x, y, w, h, type) {
+                this.x = x; this.y = y; this.w = w; this.h = h;
+                this.type = type; this.hp = 1500; this.alive = true;
+            }
+            draw() {
+                if (!this.alive) return;
+                ctx.fillStyle = this.type === 0 ? "#444" : "#8b4513";
+                ctx.fillRect(this.x, this.y, this.w, this.h);
+            }
         }
 
-        // --- スティック管理 ---
+        class Bullet {
+            constructor(x, y, angle, speed, dmg, owner, color="yellow") {
+                this.x = x; this.y = y; this.sx = x; this.sy = y;
+                this.angle = angle; this.speed = speed; this.dmg = dmg || 500;
+                this.owner = owner; this.color = color; this.active = true;
+            }
+            update() {
+                this.x += Math.cos(this.angle) * this.speed;
+                this.y += Math.sin(this.angle) * this.speed;
+                if (Math.hypot(this.x - this.sx, this.y - this.sy) > 600) this.active = false;
+                
+                for(let w of walls) {
+                    if (w.alive && w.type !== 1 && this.x > w.x && this.x < w.x+w.w && this.y > w.y && this.y < w.y+w.h) {
+                        if (w.type === 2) w.hp -= this.dmg;
+                        if (w.hp <= 0) w.alive = false;
+                        this.active = false;
+                    }
+                }
+            }
+        }
+
+        // --- 操作 ---
         let sticks = {
             move: { active: false, id: null, bx: 0, by: 0, cx: 0, cy: 0 },
-            atk:  { active: false, id: null, bx: 0, by: 0, cx: 0, cy: 0 },
-            ult:  { active: false, id: null, bx: 0, by: 0, cx: 0, cy: 0 }
+            atk: { active: false, id: null, bx: 0, by: 0, cx: 0, cy: 0 },
+            ult: { active: false, id: null, bx: 0, by: 0, cx: 0, cy: 0 }
         };
 
         canvas.addEventListener("touchstart", (e) => {
+            if (gameState !== 'playing') return;
             for (let t of e.changedTouches) {
                 if (t.clientX < canvas.width / 2) startStick('move', t);
                 else if (t.clientY > canvas.height / 2) startStick('atk', t);
@@ -250,106 +207,82 @@
         canvas.addEventListener("touchmove", (e) => { for (let t of e.changedTouches) { for (let k in sticks) if (sticks[k].id === t.identifier) { sticks[k].cx = t.clientX; sticks[k].cy = t.clientY; } } });
         canvas.addEventListener("touchend", (e) => { for (let t of e.changedTouches) { for (let k in sticks) if (sticks[k].id === t.identifier) {
             if (k !== 'move') fire(player, sticks[k], k === 'ult');
-            if (k==='atk' && player.type==='japan' && player.atkStep===1) { /*日本1段階目移動処理はfire内で*/ }
             sticks[k].active = false; sticks[k].id = null;
         } } });
 
-        // --- 主要ロジック ---
-
-        function isCollidingWall(nx, ny, s) {
-            if (nx<0 || nx>WORLD.w || ny<0 || ny>WORLD.h) return true;
-            for (let w of walls) { if (!w.alive || w.type===1) continue; if (nx+s/2 > w.x && nx-s/2 < w.x+w.w && ny+s/2 > w.y && ny-s/2 < w.y+w.h) return true; }
-            return false;
-        }
-
         function fire(a, s, isUlt) {
             if (a.dead || (!isUlt && a.ammo <= 0) || (isUlt && a.ult < 100)) return;
-            if(a.type==='italy' && a.timers.pizza) return; // ピザ継続中は撃てない
             const angle = Math.atan2(s.cy - s.by, s.cx - s.bx);
-            const data = CHAR_CONFIG[a.type];
-            let dmgMult = (a.type==='japan' && a.timers.buff) ? CHAR_CONFIG.japan.buffMults[0] : 1;
-
-            if (isUlt) {
-                a.ult = 0;
-                switch(a.type) {
-                    case 'soviet': for(let i=0; i<5; i++) gameObjects.push(new GameObject(a.x,a.y,'bot',a,{lastAtk:0})); break;
-                    case 'usa': gameObjects.push(new GameObject(a.x+Math.cos(angle)*800, a.y+Math.sin(angle)*800, 'air空爆', a, {r:200})); break;
-                    case 'uk': bullets.push(new Bullet(a.x,a.y,angle,20, data.range, 1500, a, "white", 10, {type:'ukKnockback'})); break; // ノックバック後述
-                    case 'france': enemies.concat(player).forEach(e => { if(e.team!==a.team && Math.hypot(e.x-a.x,e.y-a.y)<300) e.hp *= 0.75; }); break; // 白旗簡易
-                    case 'germany': a.timers.tank=Date.now()+15000; a.speed*=0.7; a.maxHp*=CHAR_CONFIG.germany.tankHpMult; a.hp=a.maxHp; break;
-                    case 'japan': a.timers.buff = Date.now()+7000; break;
-                    case 'italy': gameObjects.push(new GameObject(a.x+Math.cos(angle)*100, a.y+Math.sin(angle)*100, 'item', a, {})); break;
-                    case 'china': a.timers.inv = Date.now()+3000; break;
-                    case 'canada': gameObjects.push(new GameObject(a.x,a.y,'blaze吹雪',a,{r:400})); break; // シロップ共通簡易
-                    case 'finland': gameObjects.push(new GameObject(a.x,a.y,'blaze吹雪',a,{r:600})); a.timers.buff=Date.now()+8000; break;
-                }
-            } else {
-                if(a.type==='italy') { a.timers.pizza=Date.now()+5000; a.timers.lastPizzaDmg=0; a.ammo=0; return; }
-                if(a.type==='france' && Math.random()<0.2) { walls.push(new Wall(a.x+Math.cos(angle)*50,a.y+Math.sin(angle)*50, 100,30, 3, CHAR_CONFIG.france.trenchHp)); }
-                
-                // ドイツ戦車砲撃
-                if(a.type==='germany' && a.timers.tank) {
-                    bullets.push(new Bullet(a.x,a.y,angle,15,800, 1000, a, "red", 15, {type:'bomb', tX:a.x+Math.cos(angle)*800, tY:a.y+Math.sin(angle)*800}));
-                } else {
-                     bullets.push(new Bullet(a.x, a.y, angle, 14, 500, data.dmg * dmgMult, a));
-                }
-                a.ammo--;
-            }
+            const dmg = CHAR_CONFIG[a.type].dmg || 500;
+            
+            bullets.push(new Bullet(a.x, a.y, angle, 15, isUlt ? dmg*2 : dmg, a, isUlt ? "orange" : "yellow"));
+            if (!isUlt) a.ammo--; else a.ult = 0;
+            a.lastCombat = Date.now();
         }
 
-        // --- メインループ ---
+        // --- ループ ---
         function loop() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (gameState === 'playing') {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // 更新
+                let mvAng = Math.atan2(sticks.move.cy - sticks.move.by, sticks.move.cx - sticks.move.bx);
+                player.update(mvAng, sticks.move.active);
 
-            // プレイヤー/敵 更新
-            [player, ...enemies].forEach(a => {
-                 let angle=0, moving=false;
-                 if(a.team==='player' && sticks.move.active) { angle=Math.atan2(sticks.move.cy-sticks.move.by, sticks.move.cx-sticks.move.bx); moving=true; }
-                 else if (a.team==='enemy' && !a.dead) { /* 簡易AI */ let dist=Math.hypot(player.x-a.x, player.y-a.y); let ang=Math.atan2(player.y-a.y, player.x-a.x); if(dist>300){angle=ang; moving=true;} if(Math.random()<0.02)fire(a, {bx:0,by:0,cx:Math.cos(ang),cy:Math.sin(ang)}, false); }
-                 a.update(angle, moving);
-            });
+                enemies.forEach(en => {
+                    let d = Math.hypot(player.x - en.x, player.y - en.y);
+                    let a = Math.atan2(player.y - en.y, player.x - en.x);
+                    if (!en.dead && d < 500 && Math.random() < 0.02) fire(en, {bx:0,by:0,cx:Math.cos(a),cy:Math.sin(a)}, false);
+                    en.update(a, !en.dead && d > 300);
+                });
 
-            // 描画（カメラ）
-            ctx.save(); ctx.translate(canvas.width/2 - player.x, canvas.height/2 - player.y);
-            ctx.fillStyle = "#1a331a"; ctx.fillRect(0,0,WORLD.w,WORLD.h); ctx.strokeStyle = "#142614";
-            for(let x=0; x<WORLD.w; x+=WORLD.grid) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,WORLD.h); ctx.stroke(); }
-            
-            // エイムガイド
-            if (sticks.atk.active) { let angle=Math.atan2(sticks.atk.cy-sticks.atk.by, sticks.atk.cx-sticks.atk.bx); ctx.setLineDash([10,10]); ctx.strokeStyle="rgba(255,255,255,0.3)"; ctx.beginPath(); ctx.moveTo(player.x,player.y); ctx.lineTo(player.x+Math.cos(angle)*CHAR_CONFIG[player.type].range,player.y+Math.sin(angle)*CHAR_CONFIG[player.type].range); ctx.stroke(); ctx.setLineDash([]); }
-
-            walls.forEach(w => w.draw());
-            gameObjects = gameObjects.filter(g => { g.update(); g.draw(); return g.alive; });
-
-            bullets = bullets.filter(b => {
-                b.update();
-                let tgs = b.owner.team==='player'?enemies:[player];
-                for (let t of tgs) {
-                    if (!t.dead && Math.hypot(b.x-t.x, b.y-t.y) < t.size) {
-                        t.hp -= b.dmg; if(b.owner.team==='player') b.owner.ult=Math.min(100, b.owner.ult+10);
-                        if(b.special && b.special.type==='ukKnockback') { t.x+=Math.cos(b.angle)*50; t.y+=Math.sin(b.angle)*50; }
-                        if(t.hp<=0) { t.dead=true; t.deathT=Date.now(); if(t.timers.tank) b.owner.ult=100; //戦車撃破でULT
-                        } return false;
+                // 描画
+                ctx.save(); ctx.translate(canvas.width/2 - player.x, canvas.height/2 - player.y);
+                ctx.fillStyle = "#1a331a"; ctx.fillRect(0,0,WORLD.w,WORLD.h);
+                walls.forEach(w => w.draw());
+                
+                bullets = bullets.filter(b => {
+                    b.update();
+                    let tgs = b.owner.team === 'player' ? enemies : [player];
+                    for (let t of tgs) {
+                        if (!t.dead && Math.hypot(b.x - t.x, b.y - t.y) < t.size) {
+                            t.hp -= b.dmg;
+                            t.lastCombat = Date.now();
+                            if (b.owner.team === 'player') b.owner.ult = Math.min(100, b.owner.ult + 25); // 4発で溜まる
+                            if (t.hp <= 0) { t.dead = true; t.deathT = Date.now(); }
+                            return false;
+                        }
                     }
-                }
-                ctx.fillStyle=b.color; ctx.beginPath(); ctx.arc(b.x,b.y,b.size,0,Math.PI*2); ctx.fill(); return b.active;
-            });
+                    ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(b.x, b.y, 6, 0, Math.PI*2); ctx.fill();
+                    return b.active;
+                });
 
-            player.draw(); enemies.forEach(e => e.draw()); ctx.restore();
+                player.draw();
+                enemies.forEach(e => e.draw());
+                ctx.restore();
 
-            // UI
-            drawStick('move', sticks.move, "#fff"); drawStick('atk', sticks.atk, "#ffee00");
-            drawStick('ult', sticks.ult, player.ult>=100?"#f00":"#555", player.ult);
-
+                // UIスティック
+                drawUI();
+            }
             requestAnimationFrame(loop);
         }
 
-        function drawStick(k, s, color, prog=null) {
-            const x = k==='move'?120:(canvas.width-120); const y = k==='ult'?120:(canvas.height-150);
-            ctx.beginPath(); ctx.arc(x,y,60,0,Math.PI*2); ctx.strokeStyle=color; ctx.lineWidth=4; ctx.stroke();
-            if(prog!==null) { ctx.beginPath(); ctx.arc(x,y,60,-Math.PI/2,-Math.PI/2+(Math.PI*2*(prog/100))); ctx.strokeStyle="#fff"; ctx.lineWidth=8; ctx.stroke(); }
-            if(s.active) { let dx=s.cx-s.bx; let dy=s.cy-s.by; let dist=Math.min(Math.hypot(dx,dy),60); let ang=Math.atan2(dy,dx); ctx.beginPath(); ctx.arc(x+Math.cos(ang)*dist,y+Math.sin(ang)*dist,30,0,Math.PI*2); ctx.fillStyle="rgba(255,255,255,0.5)"; ctx.fill(); }
+        function drawUI() {
+            // スティック描画省略（前のコードと同様）
+            const drawS = (x, y, s, color, prog=null) => {
+                ctx.beginPath(); ctx.arc(x, y, 60, 0, Math.PI*2); ctx.strokeStyle = color; ctx.stroke();
+                if (prog !== null) { ctx.beginPath(); ctx.arc(x, y, 60, -Math.PI/2, -Math.PI/2+(Math.PI*2*(prog/100))); ctx.strokeStyle="#fff"; ctx.lineWidth=8; ctx.stroke(); ctx.lineWidth=1; }
+                if (s.active) {
+                    let a = Math.atan2(s.cy-s.by, s.cx-s.bx); let d = Math.min(60, Math.hypot(s.cx-s.bx, s.cy-s.by));
+                    ctx.beginPath(); ctx.arc(x+Math.cos(a)*d, y+Math.sin(a)*d, 30, 0, Math.PI*2); ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.fill();
+                }
+            };
+            drawS(120, canvas.height-120, sticks.move, "#fff");
+            drawS(canvas.width-120, canvas.height-120, sticks.atk, "#ffee00");
+            drawS(canvas.width-120, 120, sticks.ult, player.ult>=100?"#f00":"#555", player.ult);
         }
 
+        initHome();
         loop();
     </script>
 </body>
