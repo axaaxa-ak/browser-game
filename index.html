@@ -228,7 +228,9 @@ function wallColBullet(x,y){
 function worldToTG(x,y){return{gx:Math.floor(x/TILE)*TILE,gy:Math.floor(y/TILE)*TILE};}
 function setTile(x,y,type,ownerId,dur){
   const{gx,gy}=worldToTG(x,y);const ei=tiles.findIndex(t=>t.gx===gx&&t.gy===gy);
-  if(ei>=0)tiles[ei]={gx,gy,type,ownerId,timer:dur};else tiles.push({gx,gy,type,ownerId,timer:dur});
+  const initHp=type==='trench'?2000:Infinity;
+  if(ei>=0)tiles[ei]={gx,gy,type,ownerId,timer:dur,hp:initHp,maxHp:initHp};
+  else tiles.push({gx,gy,type,ownerId,timer:dur,hp:initHp,maxHp:initHp});
 }
 function tilesAt(actor){
   const r=actor.sz,res=[];
@@ -236,6 +238,12 @@ function tilesAt(actor){
   const ys=new Set([Math.floor((actor.y-r)/TILE)*TILE,Math.floor(actor.y/TILE)*TILE,Math.floor((actor.y+r)/TILE)*TILE]);
   xs.forEach(gx=>ys.forEach(gy=>tiles.forEach(t=>{if(t.gx===gx&&t.gy===gy)res.push(t);})));
   return res;
+}
+
+// 戦車爆発など: ownerがnullの場合は全キャラ対象
+function foesAOE(owner){
+  if(!owner)return[player,...allies,...enemies,...allUnits].filter(a=>a&&!a.dead);
+  return foes(owner);
 }
 
 // ═══════════════════════════════════════════
@@ -251,8 +259,19 @@ class Bullet{
     if(this.x<-50||this.x>W.w+50||this.y<-50||this.y>W.h+50){this.active=false;return;}
     if(dst2(this.x,this.y,this.sx,this.sy)>this.range**2){this.active=false;return;}
     if(wallColBullet(this.x,this.y)){this.active=false;return;}
+    // 塹壕タイル: 敵の弾が通過すると弾消し＋塹壕HPを削る
+    const btg=worldToTG(this.x,this.y);
+    const trenchTile=tiles.find(t=>t.type==='trench'&&t.gx===btg.gx&&t.gy===btg.gy&&t.ownerId!==this.owner?.id);
+    if(trenchTile&&isFinite(trenchTile.hp)){
+      trenchTile.hp-=this.dmg*0.5;
+      if(trenchTile.hp<=0)trenchTile.timer=0;// HP0で即消去
+      this.active=false;return;// 弾消し
+    }
     for(const f of foes(this.owner)){
-      if(!f.dead&&dst2(this.x,this.y,f.x,f.y)<(f.sz+this.r)**2){f.takeDmg(this.dmg,this.owner,this.fromSP);this.active=false;return;}
+      if(!f.dead&&dst2(this.x,this.y,f.x,f.y)<(f.sz+this.r)**2){
+        if(this.dmg>0)f.takeDmg(this.dmg,this.owner,this.fromSP);
+        this.active=false;return;
+      }
     }
   }
   draw(){
@@ -366,19 +385,99 @@ class Area{
     this.f++;if(this.f>this.dur){this.active=false;return;}
     if(this.follow&&this.owner){if(this.owner.dead&&this.type!=='bliz'){this.active=false;return;}this.x=this.owner.x;this.y=this.owner.y;}
     const T=this.type,fo=foes(this.owner),fr=frds(this.owner);
-    if(T==='shock'){fo.forEach(f=>{if(!f.dead&&!this.hs.has(f)&&dst(this,f)<this.radius+f.sz){f.takeDmg(this.dmg,this.owner,true);this.hs.add(f);}});}
-    else if(T==='expl'){fo.forEach(f=>{if(!f.dead&&!this.hs.has(f)&&dst(this,f)<this.radius+f.sz){f.takeDmg(this.dmg,this.owner,true);this.hs.add(f);}});walls.forEach(w=>{if(w.brk&&w.active&&w.hp>0&&rcOv(w.x,w.y,w.w,w.h,this.x,this.y,this.radius))w.hp-=600;});}
-    else if(T==='slash'){fo.forEach(f=>{if(!f.dead&&!this.hs.has(f)){const a=Math.atan2(f.y-this.y,f.x-this.x),da=Math.abs(((a-this.ang+Math.PI*3)%(Math.PI*2))-Math.PI);if(dst(this,f)<this.radius+f.sz&&da<Math.PI/1.7){f.takeDmg(this.dmg,this.owner);this.hs.add(f);if(this.silenceHit)f.silenced=180;}}});}
-    else if(T==='pizza'){if(this.f%15===0)fo.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius+f.sz)f.takeDmg(this.dmg,this.owner);});}
+
+    // shock: 一度だけ当たる（hs使用）
+    if(T==='shock'){
+      fo.forEach(f=>{
+        if(!f.dead&&!this.hs.has(f)&&dst(this,f)<this.radius+f.sz){
+          f.takeDmg(this.dmg,this.owner,true);this.hs.add(f);
+        }
+      });
+    }
+    // expl: 一度だけ（hs使用）、owner=nullなら全員対象
+    else if(T==='expl'){
+      const targets=this.owner?foes(this.owner):[player,...allies,...enemies,...allUnits].filter(a=>a&&!a.dead);
+      targets.forEach(f=>{
+        if(!f.dead&&!this.hs.has(f)&&dst(this,f)<this.radius+f.sz){
+          f.takeDmg(this.dmg,this.owner,true);this.hs.add(f);
+        }
+      });
+      if(this.f===1)walls.forEach(w=>{if(w.brk&&w.active&&w.hp>0&&rcOv(w.x,w.y,w.w,w.h,this.x,this.y,this.radius))w.hp-=600;});
+    }
+    // slash: 角度判定あり、一度だけ（hs使用）
+    else if(T==='slash'){
+      const halfAngle=this.wideSlash?Math.PI/1.2:Math.PI/1.7;// 横薙ぎは広角
+      fo.forEach(f=>{
+        if(!f.dead&&!this.hs.has(f)){
+          const a=Math.atan2(f.y-this.y,f.x-this.x),da=Math.abs(((a-this.ang+Math.PI*3)%(Math.PI*2))-Math.PI);
+          if(dst(this,f)<this.radius+f.sz&&da<halfAngle){
+            f.takeDmg(this.dmg,this.owner);this.hs.add(f);
+            if(this.silenceHit)f.silenced=180;
+          }
+        }
+      });
+    }
+    // pizza: 持続。0.25秒(15f)ごと、hs無し（継続ダメージが仕様）
+    else if(T==='pizza'){
+      if(this.f%15===0){
+        fo.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius+f.sz)f.takeDmg(this.dmg,this.owner);});
+      }
+    }
+    // channel: 18fごと、ノックバック付き
     else if(T==='channel'){
       projectiles.forEach(p=>{if(p.owner&&p.owner.team!==this.owner.team&&dst({x:p.x,y:p.y},this)<this.radius)p.active=false;});
-      if(this.f%18===0)fo.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius+f.sz){f.takeDmg(this.dmg,this.owner,true);const a=Math.atan2(f.y-this.y,f.x-this.x);const kx=f.x+Math.cos(a)*20,ky=f.y+Math.sin(a)*20;if(wallColChar(kx,ky,f.sz))f.state={t:'stun',f:18};else{f.x=kx;f.y=ky;}}});
+      if(this.f%18===0){
+        fo.forEach(f=>{
+          if(!f.dead&&dst(this,f)<this.radius+f.sz){
+            f.takeDmg(this.dmg,this.owner,true);
+            const a=Math.atan2(f.y-this.y,f.x-this.x);
+            const kx=f.x+Math.cos(a)*20,ky=f.y+Math.sin(a)*20;
+            if(wallColChar(kx,ky,f.sz))f.state={t:'stun',f:18};else{f.x=kx;f.y=ky;}
+          }
+        });
+      }
     }
-    else if(T==='maple'){if(this.f%27===0){fo.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius+f.sz){f.takeDmg(this.dmg,this.owner);f.slowF=.5;f.slowT=60;}});fr.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius+f.sz)f.hp=Math.min(f.maxHp,f.hp+750);});}}
-    else if(T==='syrup'){if(this.f%20===0){fo.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius+f.sz){f.slowF=.45;f.slowT=90;}});fr.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius+f.sz){const k='h'+f.id;if(!this.ex[k]){f.hp=Math.min(f.maxHp,f.hp+4500);this.ex[k]=true;}else f.hp=Math.min(f.maxHp,f.hp+250);}});}}
-    else if(T==='bliz'){if(this.f%60===0)fo.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius)f.takeDmg(this.dmg,this.owner,true);});fo.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius){f.slowF=.55;f.slowT=90;}});}
-    else if(T==='wflag'){if(this.f>=this.dur-4)fr.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius){f.hp=f.maxHp;f.x=f.team===TEAM.E?W.w-200:200;f.y=W.h/2;}});}
-    else if(T==='lux_land'){if(!this.hs.size)fo.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius+f.sz){f.takeDmg(this.dmg,this.owner,true);f.state={t:'stun',f:90};this.hs.add(f);}});}
+    // maple: 着地後の残存エリア。27fごと
+    else if(T==='maple'){
+      if(this.f%27===0){
+        fo.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius+f.sz){f.takeDmg(this.dmg,this.owner);f.slowF=.5;f.slowT=60;}});
+        fr.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius+f.sz)f.hp=Math.min(f.maxHp,f.hp+750);});
+      }
+    }
+    // syrup: 20fごと、初回超回復
+    else if(T==='syrup'){
+      if(this.f%20===0){
+        fo.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius+f.sz){f.slowF=.45;f.slowT=90;}});
+        fr.forEach(f=>{
+          if(!f.dead&&dst(this,f)<this.radius+f.sz){
+            const k='h'+f.id;
+            if(!this.ex[k]){f.hp=Math.min(f.maxHp,f.hp+4500);this.ex[k]=true;}
+            else f.hp=Math.min(f.maxHp,f.hp+250);
+          }
+        });
+      }
+    }
+    // bliz: 60fごとダメージ、常時スロー
+    else if(T==='bliz'){
+      if(this.f%60===0)fo.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius)f.takeDmg(this.dmg,this.owner,true);});
+      fo.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius){f.slowF=.55;f.slowT=90;}});
+    }
+    // wflag: 終了直前に味方転送
+    else if(T==='wflag'){
+      if(this.f>=this.dur-4)fr.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius){f.hp=f.maxHp;f.x=f.team===TEAM.E?W.w-200:200;f.y=W.h/2;}});
+    }
+    // lux_land: 一度だけ（hs使用）、スタン付き
+    else if(T==='lux_land'){
+      if(this.f===1){
+        fo.forEach(f=>{
+          if(!f.dead&&!this.hs.has(f)&&dst(this,f)<this.radius+f.sz){
+            f.takeDmg(this.dmg,this.owner,true);f.state={t:'stun',f:90};this.hs.add(f);
+          }
+        });
+      }
+    }
+    // strike_mk: ダメージなし（マーカーのみ）
+    // crystal_hit: ダメージなし
   }
   draw(){
     const pr=1-this.f/this.dur,T=this.type;ctx.save();
@@ -387,7 +486,22 @@ class Area{
     else if(T==='slash'){ctx.translate(this.x,this.y);ctx.rotate(this.ang);ctx.fillStyle=`rgba(255,255,160,${pr*.65})`;ctx.beginPath();ctx.moveTo(0,0);ctx.arc(0,0,this.radius,-Math.PI/1.7,Math.PI/1.7);ctx.closePath();ctx.fill();}
     else if(T==='pizza'){ctx.translate(this.x,this.y);ctx.rotate(this.f*.32);ctx.strokeStyle='rgba(255,80,60,.9)';ctx.lineWidth=12;ctx.beginPath();ctx.arc(0,0,this.radius,0,Math.PI*2);ctx.stroke();}
     else if(T==='channel'){ctx.strokeStyle=`rgba(100,180,255,${pr*.75})`;ctx.lineWidth=20;ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.stroke();}
-    else if(T==='wflag'){ctx.strokeStyle=`rgba(255,255,255,${pr*.4})`;ctx.lineWidth=3;ctx.setLineDash([8,8]);ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='rgba(0,50,200,.12)';ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();}
+    else if(T==='wflag'){
+      // 範囲円（敵は攻撃力デバフ）
+      ctx.strokeStyle=`rgba(255,255,255,${pr*.45})`;ctx.lineWidth=3;ctx.setLineDash([10,6]);
+      ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);
+      ctx.fillStyle=`rgba(30,60,200,${pr*.12})`;ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();
+      // 白旗ポール
+      ctx.strokeStyle=`rgba(200,200,200,${pr*.9})`;ctx.lineWidth=3;
+      ctx.beginPath();ctx.moveTo(this.x,this.y+30);ctx.lineTo(this.x,this.y-40);ctx.stroke();
+      // 旗
+      ctx.fillStyle=`rgba(255,255,255,${pr*.9})`;
+      ctx.beginPath();ctx.moveTo(this.x,this.y-40);ctx.lineTo(this.x+28,this.y-28);ctx.lineTo(this.x,this.y-18);ctx.closePath();ctx.fill();
+      // 残り時間
+      const sec2=(this.dur-this.f)/60;
+      ctx.fillStyle=`rgba(255,255,200,${pr*.9})`;ctx.font=`bold 12px Arial`;ctx.textAlign='center';
+      ctx.fillText(sec2.toFixed(1)+'s',this.x,this.y+45);
+    }
     else if(T==='maple'){ctx.fillStyle=`rgba(200,60,0,${pr*.4})`;ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();}
     else if(T==='syrup'){ctx.fillStyle=`rgba(180,100,10,${pr*.45})`;ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();}
     else if(T==='bliz'){ctx.fillStyle='rgba(180,220,255,.17)';ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();ctx.strokeStyle='rgba(200,235,255,.45)';ctx.lineWidth=3;ctx.stroke();for(let i=0;i<8;i++){const a=this.f*.04+i*Math.PI/4,r2=this.radius*.7*(.5+.5*Math.sin(this.f*.03+i));ctx.fillStyle='rgba(255,255,255,.7)';ctx.beginPath();ctx.arc(this.x+Math.cos(a)*r2,this.y+Math.sin(a)*r2,4,0,Math.PI*2);ctx.fill();}}
@@ -461,6 +575,8 @@ class Actor{
     this.lastDmgT=0;this.recActive=false;this._recIv=null;this.recStep=0;
     this.vx=0;this.vy=0;
     this.isBot=false;
+    this.spawnInv=0;
+    this.belShieldCount=0;// ベルギーワッフルシールド重複カウント
     this.aiT=0;this.lastEngageT=0;this.aiMode='advance';this.aiStuckT=0;this.lastPos={x,y};
   }
   get reloadTime(){return this.rt0/this.reloadMult;}
@@ -469,6 +585,26 @@ class Actor{
 
   takeDmg(dmg,src,fromSP=false){
     if(this.dead||this.yamatoInv)return;
+    if(this.spawnInv>0)return;
+    // 戦車搭乗中: tankHpから引く（通常HPには影響しない）
+    if(this.inTank){
+      const absorbed=Math.min(dmg*.7,this.tankHp);// 戦車が70%吸収
+      this.tankHp-=absorbed;dmg-=absorbed;
+      if(this.tankHp<=0){
+        // 戦車破壊: 周囲に爆発（味方敵両方）ownerをnullにして全員対象
+        this.inTank=false;this.sz=CD['germany'].sz;this.spd=CD['germany'].spd;
+        const explArea=new Area(this.x,this.y,'expl',null,180,1200,18);
+        areas.push(explArea);
+        this.state={t:'stun',f:30};
+        addKillLog('ドイツ戦車が破壊された','e');
+      }
+      if(dmg<=0)return;
+    }
+    // フランス塹壕タイルにいる味方へのダメージを50%カット
+    if(!fromSP){
+      const myTiles=tilesAt(this);
+      if(myTiles.some(t=>t.type==='trench'))dmg*=0.5;
+    }
     let m=1;
     areas.forEach(a=>{if(a.type==='wflag'&&a.owner&&a.owner.team!==this.team&&dst(this,a)<a.radius)m*=.75;});
     if(src){const st=tilesAt(src);if(st.some(t=>t.type==='trench'))m*=.6;}
@@ -488,7 +624,7 @@ class Actor{
   }
   die(killer){
     this.dead=true;
-    const noR=gMode==='knockout'||gMode==='br';
+    const noR=gMode==='knockout'||gMode==='br'||this.isBot;// botは絶対復帰しない
     this.respawnT=noR?Infinity:5000;
     if(this.yamato&&this.team===TEAM.P&&!noR)this.respawnT=3000;
     this.state=null;this.inTank=false;this.yamato=false;this.yamatoInv=false;this.blizzard=false;this.invisible=false;this.atkMult=1;this.spdMult=1;this.reloadMult=1;
@@ -503,6 +639,9 @@ class Actor{
     this.state=null;this.poisonT=0;this.silenced=0;this.atkMult=1;this.spdMult=1;this.reloadMult=1;this.slowF=1;this.slowT=0;
     this.invisible=false;this.shield=0;this.hitFlash=0;this.inTank=false;this.tankHp=0;this.yamato=false;this.yamatoInv=false;this.blizzard=false;this.spTimer=0;
     this.lastDmgT=0;this.recActive=false;this.aiMode='advance';
+    this.belShieldCount=0;
+    // スポーン無敵: 3秒間 (180f)
+    this.spawnInv=180;
     const sp=spawnPos(this.team);this.x=sp.x;this.y=sp.y;this._resolveWalls();
     unitPoints[this.id]=2;
     if(this.team===TEAM.P)hideDead();
@@ -537,7 +676,23 @@ class Actor{
   // ── ATTACKS ──
   atk(ang){
     if(this.dead||this.atkCD>0||this.silenced>0)return;
-    if(gMode==='soccer'){if(ball&&dst(this,ball)<this.sz+ball.r+35&&this.ammo>0){ball.kick(ang,24);this.ammo--;this.atkCD=18;}return;}
+    this.spawnInv=0;// 攻撃したら無敵解除（BS準拠）
+    if(gMode==='soccer'){
+      if(ball&&dst(this,ball)<this.sz+ball.r+40){
+        // ボール保持中: 通常攻撃 = シュート（リロード1消費）
+        if(this.ammo>0){ball.kick(ang,26);this.ammo--;this.atkCD=20;}
+      }
+      // ボール不保持中は通常攻撃可能
+      else{
+        const T=this.type;
+        ({soviet:()=>this.sovAtk(ang),usa:()=>this.usaAtk(ang),uk:()=>this.ukAtk(ang),france:()=>this.fraAtk(ang),
+          germany:()=>this.inTank?this.tankAtk(ang):this.gerAtk(ang),japan:()=>this.jpAtk(ang),italy:()=>this.itaAtk(ang),
+          china:()=>this.chiAtk(ang),canada:()=>this.canAtk(ang),
+          finland:()=>this.blizzard?this.finSMG(ang):this.finSnipe(ang),
+          belgium:()=>this.belAtk(ang),netherlands:()=>this.nlAtk(),luxembourg:()=>this.luxAtk(ang)}[T]||(() => {}))();
+      }
+      return;
+    }
     const T=this.type;
     ({soviet:()=>this.sovAtk(ang),usa:()=>this.usaAtk(ang),uk:()=>this.ukAtk(ang),france:()=>this.fraAtk(ang),
       germany:()=>this.inTank?this.tankAtk(ang):this.gerAtk(ang),japan:()=>this.jpAtk(ang),italy:()=>this.itaAtk(ang),
@@ -547,9 +702,19 @@ class Actor{
   }
   sovAtk(ang){
     const ph=this.atkPhase%3;
-    if(ph===0){areas.push(new Area(this.x+Math.cos(ang)*140,this.y+Math.sin(ang)*140,'shock',this,50,1600,14,ang));this.atkCD=55;}
-    else if(ph===1){areas.push(new Area(this.x,this.y,'slash',this,175,2200,13,ang));this.atkCD=45;}
-    else{projectiles.push(new Boomerang(this.x,this.y,ang,8,650,1800*this.atkMult,this));this.atkCD=90;}
+    if(ph===0){
+      // 槌: 前方のみに衝撃波（shockではなくslashを流用して角度制限）
+      const sa=new Area(this.x+Math.cos(ang)*100,this.y+Math.sin(ang)*100,'slash',this,160,1600,14,ang);
+      areas.push(sa);this.atkCD=55;
+    }else if(ph===1){
+      // 鎌横薙ぎ: 左右ワイドなslash
+      const sa=new Area(this.x,this.y,'slash',this,175,2200,13,ang);
+      sa.wideSlash=true;// 角度を広げる
+      areas.push(sa);this.atkCD=45;
+    }else{
+      // 鎌投げ: ブーメラン
+      projectiles.push(new Boomerang(this.x,this.y,ang,8,650,1800*this.atkMult,this));this.atkCD=90;
+    }
     this.atkPhase++;
   }
   usaAtk(ang){if(this.ammo<=0)return;for(let i=0;i<5;i++)projectiles.push(new Bullet(this.x,this.y,ang+(i-2)*.09,14,1000,450*this.atkMult,this,7,'#ffe040'));this.ammo--;this.atkCD=22;}
@@ -561,15 +726,48 @@ class Actor{
   gerAtk(ang){if(this.ammo<=0)return;for(let i=0;i<15;i++)setTimeout(()=>{if(!this.dead)projectiles.push(new FadeBullet(this.x,this.y,ang+(Math.random()-.5)*.6,13,600,250*this.atkMult,this,6,'#ffee66'));},i*35);this.ammo--;this.atkCD=110;}
   tankAtk(ang){if(this.ammo<=0)return;projectiles.push(new ExpBullet(this.x,this.y,ang,8,850,2500*this.atkMult,this,160,'#ff8800'));this.ammo--;this.atkCD=90;this.tankHits++;this.addSP(500);}
   jpAtk(ang){
-    if(this.atkPhase%2===0){this.state={t:'jp_charge',f:16,ang,dashHit:false,dashTarget:null};this.atkCD=12;}
-    else{areas.push(new Area(this.x,this.y,'slash',this,200,2500*this.atkMult,13,ang));projectiles.push(new Bullet(this.x,this.y,ang,15,500,800*this.atkMult,this,8,'#eee'));this.atkCD=60;}
+    if(this.atkPhase%2===0){
+      // 1発目: チャージ突進
+      this.state={t:'jp_charge',f:16,ang,dashHit:false,dashTarget:null};this.atkCD=12;
+    }else{
+      // 2発目: 前方広範囲斬撃（飛ぶ斬撃はslash一本にまとめてダメージ重複防止）
+      const sa=new Area(this.x,this.y,'slash',this,220,2500*this.atkMult,13,ang);
+      areas.push(sa);
+      // 斬撃波エフェクト（ダメージなし・見た目用）
+      projectiles.push(new Bullet(this.x,this.y,ang,14,480,0,this,8,'rgba(220,220,255,0.7)'));
+      this.atkCD=60;
+    }
     this.atkPhase++;
   }
   itaAtk(ang){if(this.ammo<=0)return;areas.push(new Area(this.x,this.y,'pizza',this,88,2200*this.atkMult,300,ang,this));this.ammo--;this.atkCD=28;}
   chiAtk(ang){if(this.state&&this.state.t==='chi_ch')return;this.state={t:'chi_ch',f:15,ang};this.atkCD=80;}
-  canAtk(ang){if(this.ammo<=0)return;const tx=clamp(spTarget.x,0,W.w),ty=clamp(spTarget.y,0,W.h);projectiles.push(new Thrown(this.x,this.y,tx,ty,this,'maple',90,1050*this.atkMult));this.ammo--;this.atkCD=70;}
+  canAtk(ang){
+    if(this.ammo<=0)return;
+    let tx=spTarget.x,ty=spTarget.y;
+    // タップ時などspTargetが近すぎる場合は最近敵に自動エイム
+    if(Math.hypot(tx-this.x,ty-this.y)<120){
+      const near=foes(this).filter(f=>!f.dead).reduce((a,b)=>!a||dst(this,b)<dst(this,a)?b:a,null);
+      if(near){tx=near.x;ty=near.y;}else{tx=this.x+Math.cos(ang)*400;ty=this.y+Math.sin(ang)*400;}
+    }
+    projectiles.push(new Thrown(this.x,this.y,clamp(tx,0,W.w),clamp(ty,0,W.h),this,'maple',90,1050*this.atkMult));
+    this.ammo--;this.atkCD=70;
+  }
   finSnipe(ang){if(this.ammo<=0)return;projectiles.push(new Bullet(this.x,this.y,ang,22,2000,3300*this.atkMult,this,10,'#88ccff'));this.ammo--;this.atkCD=100;}
-  finSMG(ang){if(this.ammo<=0)return;for(let i=0;i<20;i++)setTimeout(()=>{if(!this.dead)projectiles.push(new Bullet(this.x,this.y,ang+(Math.random()-.5)*.9,14,280,450*this.atkMult,this,5,'#aaddff',true));},i*44);this.ammo--;this.atkCD=85;}
+  finSMG(ang){
+    if(this.ammo<=0)return;
+    for(let i=0;i<20;i++){
+      setTimeout(()=>{
+        if(!this.dead){
+          const sp=(Math.random()-.5)*.9;
+          // fromSP=true でSPゲージが貯まらない
+          const b=new Bullet(this.x,this.y,ang+sp,14,280,450*this.atkMult,this,5,'#aaddff',true);
+          b.noSPGain=true;
+          projectiles.push(b);
+        }
+      },i*44);
+    }
+    this.ammo--;this.atkCD=85;
+  }
   belAtk(ang){
     if(this.ammo<=0)return;const shot=this.nextBelShot;this.nextBelShot=Math.random()<.5?'choco':'waffle';
     const b=shot==='choco'?new Bullet(this.x,this.y,ang,12,700,0,this,8,'#8B4513'):new Bullet(this.x,this.y,ang,12,700,1600*this.atkMult,this,9,'#ffcc88');
@@ -581,7 +779,14 @@ class Actor{
   // ── SPECIALS ──
   special(ang){
     if(this.dead||this.spGauge<this.spMax)return;
-    if(gMode==='soccer'){if(ball&&dst(this,ball)<this.sz+ball.r+50){ball.kick(ang,42);return;}}
+    if(gMode==='soccer'){
+      if(ball&&dst(this,ball)<this.sz+ball.r+50){
+        // ウルトシュート: 消費してパワーシュート
+        ball.kick(ang,48);
+        addDmg(this.x,this.y-this.sz-20,0,'#ffcc00');// エフェクト
+      }
+      return;
+    }
     this.spGauge=0;
     const T=this.type;
     ({soviet:()=>this.spSov(),usa:()=>this.spUSA(),uk:()=>this.spUK(),france:()=>this.spFra(),
@@ -589,7 +794,17 @@ class Actor{
       china:()=>this.spChi(),canada:()=>this.spCan(),finland:()=>this.spFin(),
       belgium:()=>this.spBel(ang),netherlands:()=>this.spNL(),luxembourg:()=>this.spLux()}[T]||(() => {}))();
   }
-  spSov(){while(sovietBots.length>=10){const mi=sovietBots.reduce((a,b,i,arr)=>b.hp<arr[a].hp?i:a,0);sovietBots[mi].dead=true;sovietBots.splice(mi,1);}for(let i=0;i<3;i++){const b=new SovietBot(this.x+(Math.random()-.5)*160,this.y+(Math.random()-.5)*160,this.team,this);sovietBots.push(b);(this.team===TEAM.E?enemies:allies).push(b);}}
+  spSov(){
+    // 最大10体。追加3体の余裕を確保してからスポーン
+    while(sovietBots.length>7){
+      const mi=sovietBots.reduce((a,b,i,arr)=>b.hp<arr[a].hp?i:a,0);
+      sovietBots[mi].dead=true;sovietBots.splice(mi,1);
+    }
+    for(let i=0;i<3;i++){
+      const b=new SovietBot(this.x+(Math.random()-.5)*160,this.y+(Math.random()-.5)*160,this.team,this);
+      sovietBots.push(b);(this.team===TEAM.E?enemies:allies).push(b);
+    }
+  }
   spUSA(){areas.push(new Area(spTarget.x,spTarget.y,'strike_mk',this,260,0,120));setTimeout(()=>{for(let i=0;i<12;i++){const ox=(Math.random()-.5)*320,oy=(Math.random()-.5)*320;areas.push(new Area(spTarget.x+ox,spTarget.y+oy,'expl',this,140,5000,18));walls.forEach(w=>{if(w.brk&&w.active&&w.hp>0&&rcOv(w.x,w.y,w.w,w.h,spTarget.x+ox,spTarget.y+oy,140))w.hp-=2000;});}},2000);}
   spUK(){areas.push(new Area(this.x,this.y,'channel',this,200,850,300));this.spTimer=300;this.spTimerMax=300;}
   spFra(){areas.push(new Area(spTarget.x,spTarget.y,'wflag',this,260,0,480));}
@@ -602,7 +817,14 @@ class Actor{
   spFin(){this.blizzard=true;areas.push(new Area(this.x,this.y,'bliz',this,540,550,600,0,this));this.spTimer=600;this.spTimerMax=600;}
   spBel(ang){const a=new Area(this.x,this.y,'slash',this,180,3200,13,ang);a.silenceHit=true;areas.push(a);}
   spNL(){tiles.forEach(t=>{if(t.type==='reclaim'&&t.ownerId===this.id){t.type='flood';t.timer=420;}});this.spTimer=420;this.spTimerMax=420;}
-  spLux(){projectiles.push(new Thrown(this.x,this.y,spTarget.x,spTarget.y,this,'lux_land',140,3300));this.invisible=true;setTimeout(()=>{this.x=spTarget.x;this.y=spTarget.y;this.invisible=false;},450);}
+  spLux(){
+    // Edgar飛翔スタイル: キャラ自身がジャンプ弧を描いて着地、着地時爆発
+    const tx=spTarget.x,ty=spTarget.y;
+    const dist=Math.hypot(tx-this.x,ty-this.y);
+    const frames=clamp(Math.round(dist/12),18,60);
+    this.state={t:'lux_jump',f:0,maxF:frames,sx:this.x,sy:this.y,tx,ty,height:0};
+    this.spTimer=frames+5;this.spTimerMax=frames+5;
+  }
 
   update(){
     if(this.dead){if(isFinite(this.respawnT)){this.respawnT-=16.67;if(this.respawnT<=0)this.respawn();}return;}
@@ -616,12 +838,51 @@ class Actor{
         if(!s.dashHit)for(const f of foes(this)){if(!f.dead&&dst(this,f)<this.sz+f.sz+10){f.takeDmg(1500*this.atkMult,this);s.dashHit=true;s.dashTarget=f;break;}}
         if(s.f<=0){const sa=new Area(this.x,this.y,'slash',this,105,2000*this.atkMult,11,a);if(s.dashTarget)sa.hs.add(s.dashTarget);areas.push(sa);this.state=null;}
       }
-      else if(s.t==='chi_ch'){s.f--;if(s.f<=0){const a=s.ang;for(let i=0;i<5;i++)projectiles.push(new Bullet(this.x,this.y,a+(i-2)*.17,16,700,750*this.atkMult,this,7,'#ffee00'));this.state=null;}}
+      else if(s.t==='chi_ch'){
+        s.f--;
+        if(s.f<=0){
+          const tx=spTarget.x,ty=spTarget.y;
+          // 全弾が同じ目標点に収束（発射位置を横にずらして収束させる）
+          for(let i=0;i<5;i++){
+            const perp=s.ang+Math.PI/2;
+            const offX=Math.cos(perp)*(i-2)*22;
+            const offY=Math.sin(perp)*(i-2)*22;
+            const sx2=this.x+offX,sy2=this.y+offY;
+            const ang2=Math.atan2(ty-sy2,tx-sx2);
+            const d2=Math.hypot(tx-sx2,ty-sy2);
+            projectiles.push(new Bullet(sx2,sy2,ang2,16,d2+50,750*this.atkMult,this,7,'#ffee00'));
+          }
+          this.state=null;
+        }
+      }
+      else if(s.t==='lux_jump'){
+        // Edgar飛翔: 弧を描いて着地、着地時爆発
+        s.f++;const prog=s.f/s.maxF;
+        this.x=s.sx+(s.tx-s.sx)*prog;
+        this.y=s.sy+(s.ty-s.sy)*prog;
+        s.height=Math.sin(prog*Math.PI)*Math.min(150,Math.hypot(s.tx-s.sx,s.ty-s.sy)*.4);
+        this._jumpHeight=s.height;
+        if(s.f>=s.maxF){
+          areas.push(new Area(this.x,this.y,'lux_land',this,150,3300,20));
+          this._jumpHeight=0;this.state=null;
+        }
+      }
       else if(s.t==='lux_dash'){
         s.f--;const a=s.ang;
         let nx=clamp(this.x+Math.cos(a)*19,this.sz+2,W.w-this.sz-2),ny=clamp(this.y+Math.sin(a)*19,this.sz+2,W.h-this.sz-2);
         if(!wallColChar(nx,this.y,this.sz))this.x=nx;if(!wallColChar(this.x,ny,this.sz))this.y=ny;
-        if(!s.hit)for(const f of foes(this)){if(!f.dead&&dst(this,f)<this.sz+f.sz+8){f.takeDmg(2400*this.atkMult,this);const kb=Math.atan2(f.y-this.y,f.x-this.x);const kx=f.x+Math.cos(kb)*20,ky=f.y+Math.sin(kb)*20;if(wallColChar(kx,ky,f.sz))f.state={t:'stun',f:18};else{f.x=kx;f.y=ky;}this.hp=Math.min(this.maxHp,this.hp+1000);s.hit=true;break;}}
+        if(!s.hit)for(const f of foes(this)){
+          if(!f.dead&&dst(this,f)<this.sz+f.sz+8){
+            f.takeDmg(2400*this.atkMult,this);
+            // ノックバックのみ（スタンなし）、壁衝突時は0.3秒スタン
+            const kb=Math.atan2(f.y-this.y,f.x-this.x);
+            const kx=f.x+Math.cos(kb)*24,ky=f.y+Math.sin(kb)*24;
+            if(wallColChar(kx,ky,f.sz)){
+              f.state={t:'stun',f:18};// 壁にぶつかった場合のみ0.3秒スタン
+            }else{f.x=kx;f.y=ky;}
+            this.hp=Math.min(this.maxHp,this.hp+1000);s.hit=true;break;
+          }
+        }
         if(s.f<=0)this.state=null;
       }
     }
@@ -631,10 +892,11 @@ class Actor{
     if(this.poisonT>0){this.poisonT--;if(this.poisonT%60===0){this.hp=Math.max(1,this.hp-this.poisonDmg);addDmg(this.x,this.y-this.sz-10,this.poisonDmg,'#66ff66');}}
     if(this.ammo<this.maxAmmo){this.reloadT++;if(this.reloadT>=this.reloadTime){this.ammo++;this.reloadT=0;}}
     if(this.atkCD>0)this.atkCD--;if(this.hitFlash>0)this.hitFlash--;
+    if(this.spawnInv>0)this.spawnInv--;// スポーン無敵カウントダウン
     tilesAt(this).forEach(t=>{if(t.type==='flood'&&t.ownerId!==this.id){this.slowF=.5;this.slowT=40;}});
     items.forEach(it=>{if(it.active&&it.team===this.team&&!this.dead&&dst(this,it)<it.r+this.sz)it.apply(this);});
     const now=Date.now();
-    if(!this.recActive&&this.lastDmgT>0&&now-this.lastDmgT>5000&&this.hp<this.maxHp){
+    if(!this.recActive&&!this.isBot&&this.lastDmgT>0&&now-this.lastDmgT>5000&&this.hp<this.maxHp){
       this.recActive=true;this.recStep=0;
       this._recIv=setInterval(()=>{if(this.dead||!this.recActive||this.hp>=this.maxHp||this.recStep>=REC.length){clearInterval(this._recIv);this._recIv=null;this.recActive=false;return;}this.hp=Math.min(this.maxHp,this.hp+this.maxHp*REC[this.recStep++]);},1000);
     }
@@ -644,11 +906,27 @@ class Actor{
   drawSelf(){
     if(this.dead)return;
     if(this.invisible&&this.team===TEAM.E)return;
+    // lux_jump中は空中にいる（影+本体を分離）
+    const jumpH=this._jumpHeight||0;
     ctx.save();ctx.translate(this.x,this.y);
     if(this.hitFlash>0)ctx.globalAlpha=.4+.6*(this.hitFlash%2);
+    // スポーン無敵: 白く点滅
+    if(this.spawnInv>0){
+      ctx.globalAlpha=(this.spawnInv%18<9)?0.4:0.95;
+    }
     const c=CD[this.type];
-    // Shadow
-    ctx.save();ctx.globalAlpha*=.3;ctx.fillStyle='#000';ctx.beginPath();ctx.ellipse(0,this.sz*.6,this.sz*.8,this.sz*.25,0,0,Math.PI*2);ctx.fill();ctx.restore();
+    // 空中描画: 影は地面に、本体は高さ分上
+    if(jumpH>0){
+      // 影（地面）
+      ctx.save();ctx.globalAlpha*=.25;ctx.fillStyle='#000';
+      ctx.beginPath();ctx.ellipse(0,this.sz*.5,this.sz*(1-jumpH/200),this.sz*.18,0,0,Math.PI*2);ctx.fill();ctx.restore();
+    }
+    // 本体（ジャンプ中は上にずらして描画）
+    const drawOffY=-jumpH;
+    // 通常の地面影（ジャンプ中は上記で別処理）
+    if(jumpH<=0){ctx.save();ctx.globalAlpha*=.3;ctx.fillStyle='#000';ctx.beginPath();ctx.ellipse(0,this.sz*.6,this.sz*.8,this.sz*.25,0,0,Math.PI*2);ctx.fill();ctx.restore();}
+    // 本体: ジャンプ高さ分だけ上にずらす
+    ctx.translate(0,drawOffY);
     // Tank body
     if(this.inTank){ctx.fillStyle='#555';ctx.beginPath();ctx.ellipse(0,0,this.sz+16,this.sz+11,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#888';ctx.lineWidth=3;ctx.stroke();}
     // Body gradient
@@ -699,22 +977,31 @@ class Actor{
     ctx.fillStyle='#fff';ctx.font='bold 8px Arial';ctx.textAlign='center';ctx.fillText(Math.ceil(this.hp),this.x,by+hbh-1.5);
     // Shield
     if(this.shield>0){ctx.globalAlpha=.5;ctx.fillStyle='#6688ff';roundRect(ctx,bx,by,bw*Math.min(1,this.shield/this.maxHp),hbh,hbh/2);ctx.fill();ctx.globalAlpha=1;}
-    // Ammo dots (Brawl Stars style)
-    const am=this.maxAmmo,dotR=5,dotGap=3;const totalW=am*(dotR*2)+( am-1)*dotGap;const dotX=this.x-totalW/2;
+    // Ammo dots (Brawl Stars style) - 完全修正版
+    const am=this.maxAmmo;
+    const dotR=5,dotGap=4;
+    const totalW=am*(dotR*2)+(am-1)*dotGap;
+    const dotStartX=this.x-totalW/2;
+    const dotY=by+hbh+9;
     for(let i=0;i<am;i++){
-      const cx2=dotX+i*(dotR*2+dotGap)+dotR,cy2=by+hbh+8;
+      const cx2=dotStartX+i*(dotR*2+dotGap)+dotR;
       if(i<this.ammo){
-        // Filled dot
-        ctx.beginPath();ctx.arc(cx2,cy2,dotR,0,Math.PI*2);ctx.fillStyle='#f1c40f';ctx.fill();
+        // 弾あり: 黄色
+        ctx.beginPath();ctx.arc(cx2,dotY,dotR,0,Math.PI*2);ctx.fillStyle='#f1c40f';ctx.fill();
         ctx.strokeStyle='rgba(0,0,0,.4)';ctx.lineWidth=1;ctx.stroke();
-        ctx.save();ctx.globalAlpha=.4;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(cx2-1,cy2-1.5,dotR*.5,0,Math.PI*2);ctx.fill();ctx.restore();
-      }else if(i===this.ammo&&this.ammo<am){
-        // Reloading dot
-        ctx.beginPath();ctx.arc(cx2,cy2,dotR,0,Math.PI*2);ctx.fillStyle='#333';ctx.fill();ctx.strokeStyle='#555';ctx.lineWidth=1;ctx.stroke();
-        const prog=this.reloadT/this.reloadTime;
-        ctx.beginPath();ctx.moveTo(cx2,cy2);ctx.arc(cx2,cy2,dotR,-Math.PI/2,-Math.PI/2+Math.PI*2*prog);ctx.closePath();ctx.fillStyle='#e6a800';ctx.fill();
+        ctx.save();ctx.globalAlpha=.4;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(cx2-1,dotY-2,dotR*.5,0,Math.PI*2);ctx.fill();ctx.restore();
       }else{
-        ctx.beginPath();ctx.arc(cx2,cy2,dotR,0,Math.PI*2);ctx.fillStyle='#222';ctx.fill();ctx.strokeStyle='#444';ctx.lineWidth=1;ctx.stroke();
+        // 弾なし: 暗い
+        ctx.beginPath();ctx.arc(cx2,dotY,dotR,0,Math.PI*2);ctx.fillStyle='#222';ctx.fill();
+        ctx.strokeStyle='#444';ctx.lineWidth=1;ctx.stroke();
+        // リロード中のスロット: ammo個目（0始まり）のスロットのみプログレス表示
+        if(i===this.ammo&&this.ammo<am){
+          const prog=clamp(this.reloadT/Math.max(1,this.reloadTime),0,1);
+          // 扇形プログレス
+          ctx.beginPath();ctx.moveTo(cx2,dotY);
+          ctx.arc(cx2,dotY,dotR,-Math.PI/2,-Math.PI/2+Math.PI*2*prog);
+          ctx.closePath();ctx.fillStyle='#e6a800';ctx.fill();
+        }
       }
     }
     // SP indicator (small bar below ammo)
@@ -732,6 +1019,19 @@ class Actor{
       ctx.fillStyle='#ffcc88';ctx.font='7px Arial';ctx.textAlign='center';ctx.fillText(`${sec}s`,this.x,spY+18);
     }
     if(this.type==='belgium'){ctx.fillStyle='#ffcc00';ctx.font='7px Arial';ctx.textAlign='center';ctx.fillText('次:'+(this.nextBelShot==='choco'?'チョコ':'ワッフル'),this.x,spY+(this.spTimer>0?18:10));}
+    // 戦車HP表示
+    if(this.inTank&&this.tankHp>0){
+      const tankMax=CD['germany'].hp*1.5;const tr2=this.tankHp/tankMax;
+      ctx.fillStyle='rgba(0,0,0,.5)';roundRect(ctx,bx,spY+24,bw,5,2.5);ctx.fill();
+      ctx.fillStyle='#aaaaaa';roundRect(ctx,bx,spY+24,bw*tr2,5,2.5);ctx.fill();
+      ctx.fillStyle='#ccc';ctx.font='7px Arial';ctx.textAlign='center';ctx.fillText(`戦車 ${Math.ceil(this.tankHp)}`,this.x,spY+34);
+    }
+    // スポーン無敵残り時間
+    if(this.spawnInv>0){
+      const invSec=(this.spawnInv/60).toFixed(1);
+      ctx.fillStyle='rgba(100,200,255,.9)';ctx.font='bold 8px Arial';ctx.textAlign='center';
+      ctx.fillText(`無敵 ${invSec}s`,this.x,by-16);
+    }
   }
 
   // ── AI ──
@@ -768,11 +1068,20 @@ class Actor{
     if(!ball||!soccerBounds)return;const b=soccerBounds;
     const goalX=this.team===TEAM.E?b.ox:b.ox+b.fw,goalY=b.oy+b.fh/2;
     const bd=dst(this,ball);
-    if(bd<this.sz+ball.r+40){const ang=Math.atan2(goalY-this.y,goalX-this.x)+(Math.random()-.5)*.3;if(this.atkCD<=0){ball.kick(ang,22);this.atkCD=25;}}
-    else{const ang=Math.atan2(ball.y-this.y,ball.x-this.x);this.move(Math.cos(ang),Math.sin(ang));}
+    if(bd<this.sz+ball.r+42){
+      // ボール保持中: リロード1消費してシュート
+      const ang=Math.atan2(goalY-this.y,goalX-this.x)+(Math.random()-.5)*.3;
+      if(this.atkCD<=0&&this.ammo>0){ball.kick(ang,24);this.ammo--;this.atkCD=22;}
+    }else{
+      const ang=Math.atan2(ball.y-this.y,ball.x-this.x);this.move(Math.cos(ang),Math.sin(ang));
+    }
+    // 非保持時は近くの敵に通常攻撃
     const fo=foes(this).filter(f=>!f.dead);
-    if(fo.length&&this.aiT%35===0){const near=fo.reduce((a,b)=>dst(this,b)<dst(this,a)?b:a);if(dst(this,near)<700)this.atk(Math.atan2(near.y-this.y,near.x-this.x));}
-    if(this.spGauge>=this.spMax)this.special(Math.atan2(goalY-this.y,goalX-this.x));
+    if(fo.length&&this.aiT%35===0){
+      const near=fo.reduce((a,nn)=>dst(this,nn)<dst(this,a)?nn:a);
+      if(dst(this,near)<700&&bd>this.sz+ball.r+60)this.atk(Math.atan2(near.y-this.y,near.x-this.x));
+    }
+    if(this.spGauge>=this.spMax&&bd<this.sz+ball.r+60)this.special(Math.atan2(goalY-this.y,goalX-this.x));
   }
   _brAI(fo){
     if(!fo.length)return;const near=fo.reduce((a,b)=>dst(this,b)<dst(this,a)?b:a);
@@ -840,10 +1149,27 @@ function hideDead(){document.getElementById('deadOv').classList.remove('show');}
 function showWin(t,m){document.getElementById('winOv').classList.add('show');document.getElementById('wTtl').textContent=t;document.getElementById('wMsg').textContent=m;}
 function checkEnd(){
   if(gState!=='play')return;
-  if(gMode==='br'){const al=allUnits.filter(a=>!a.dead);if(al.length<=1){gState='gameEnd';showWin(al[0]===player?'WINNER!':'ELIMINATED',al[0]===player?'バトルロワイヤル優勝！':'敗北...');}}
-  else if(gMode==='knockout'){const pa=[player,...allies].filter(a=>a&&!a.dead).length,ea=enemies.filter(a=>!a.dead).length;if(pa===0){koWins[1]++;endKO();}else if(ea===0){koWins[0]++;endKO();}}
-  else if(gMode==='point_ko'){if(pointScore.p>=20)showWin('VICTORY!',`${pointScore.p}ポイント獲得！`),gState='gameEnd';else if(pointScore.e>=20)showWin('DEFEAT','敵20ポイント到達...'),gState='gameEnd';}
-  else if(enemies.filter(a=>!a.dead).length===0){gState='gameEnd';showWin('VICTORY!','敵チームを全滅！');}
+  if(gMode==='br'){
+    const al=allUnits.filter(a=>!a.dead);
+    if(al.length<=1){gState='gameEnd';showWin(al[0]===player?'WINNER!':'ELIMINATED',al[0]===player?'バトルロワイヤル優勝！':'敗北...');}
+  }else if(gMode==='knockout'){
+    const pa=[player,...allies].filter(a=>a&&!a.dead).length,ea=enemies.filter(a=>!a.dead).length;
+    if(pa===0){koWins[1]++;endKO();}else if(ea===0){koWins[0]++;endKO();}
+  }else if(gMode==='point_ko'){
+    if(pointScore.p>=20){gState='gameEnd';showWin('VICTORY!',`${pointScore.p}ポイント獲得！`);}
+    else if(pointScore.e>=20){gState='gameEnd';showWin('DEFEAT','敵20ポイント到達...');}
+  }else if(gMode==='territory'){
+    if(terrGauge.p>=100){gState='gameEnd';showWin('VICTORY!','陣地占領成功！');}
+    else if(terrGauge.e>=100){gState='gameEnd';showWin('DEFEAT','陣地を占領された...');}
+    // territory: キル数では勝敗決まらない
+  }else if(gMode==='crystal_defense'){
+    // Crystal.takeDmg()で処理。敵を全員倒しても即勝利にはしない（クリスタルが残れば継続）
+  }else if(gMode==='soccer'){
+    // Ball.update()→scoreSoccer()で処理
+  }else{
+    // normal / select
+    if(enemies.filter(a=>!a.dead&&!a.isBot).length===0){gState='gameEnd';showWin('VICTORY!','敵チームを全滅！');}
+  }
 }
 function endKO(){
   gState='roundEnd';document.getElementById('sb').textContent=`ラウンド${koRound} — 味方${koWins[0]}-${koWins[1]}敵`;
@@ -885,49 +1211,57 @@ canvas.addEventListener('touchmove',e=>{
   for(const t of e.changedTouches){
     for(const k of['mv','at','sp'])if(stk[k].id===t.identifier){stk[k].cx=t.clientX;stk[k].cy=t.clientY;}
   }
-  // Update spTarget from attack stick (BS: aim as you drag)
+  // 攻撃スティック: 動かしながらリアルタイムにspTarget更新
   if(stk.at.a&&player&&!player.dead){
     const dx=stk.at.cx-stk.at.bx,dy=stk.at.cy-stk.at.by;
-    if(Math.hypot(dx,dy)>12)updSP(Math.atan2(dy,dx),Math.hypot(dx,dy));
+    if(Math.hypot(dx,dy)>8)updSP(Math.atan2(dy,dx),Math.hypot(dx,dy));
   }
-  // Update spTarget from super button drag
   if(stk.sp.a&&player&&!player.dead){
     const dx=stk.sp.cx-stk.sp.bx,dy=stk.sp.cy-stk.sp.by;
-    if(Math.hypot(dx,dy)>12)updSP(Math.atan2(dy,dx),Math.hypot(dx,dy));
+    if(Math.hypot(dx,dy)>8)updSP(Math.atan2(dy,dx),Math.hypot(dx,dy));
   }
 },{passive:false});
 
 canvas.addEventListener('touchend',e=>{
   e.preventDefault();
   for(const t of e.changedTouches){
-    // Attack stick release
     if(stk.at.id===t.identifier){
       if(player&&!player.dead){
         const dx=stk.at.cx-stk.at.bx,dy=stk.at.cy-stk.at.by;const mag=Math.hypot(dx,dy);
-        if(mag<14){
-          // Tap → auto-aim nearest
-          const near=foes(player).filter(f=>!f.dead).reduce((a,b)=>!a||dst(player,b)<dst(player,a)?b:a,null);
-          if(near)player.atk(Math.atan2(near.y-player.y,near.x-player.x));
+        if(mag<18){
+          // タップ → 最近敵にオートエイム (距離・視線を考慮して最適な敵を選ぶ)
+          const foesArr=foes(player).filter(f=>!f.dead);
+          let best=null,bestScore=Infinity;
+          foesArr.forEach(f=>{
+            const d=dst(player,f);
+            // 直近に入力した攻撃方向との差も考慮 (なければ距離だけ)
+            const score=d;
+            if(score<bestScore){bestScore=score;best=f;}
+          });
+          if(best)player.atk(Math.atan2(best.y-player.y,best.x-player.x));
         }else{
-          // Hold+drag → manual aim, release = fire
+          // ドラッグ → 手動エイムで発射
           const ang=Math.atan2(dy,dx);updSP(ang,mag);player.atk(ang);
         }
       }
       stk.at.a=false;stk.at.id=null;
     }
-    // Super button release
     if(stk.sp.id===t.identifier){
       if(player&&!player.dead&&player.spGauge>=player.spMax){
         const dx=stk.sp.cx-stk.sp.bx,dy=stk.sp.cy-stk.sp.by;const mag=Math.hypot(dx,dy);
-        const ang=mag>14?Math.atan2(dy,dx):Math.atan2(
-          (foes(player).filter(f=>!f.dead).reduce((a,b)=>!a||dst(player,b)<dst(player,a)?b:a,null)||{y:player.y-1}).y-player.y,
-          (foes(player).filter(f=>!f.dead).reduce((a,b)=>!a||dst(player,b)<dst(player,a)?b:a,null)||{x:player.x+1}).x-player.x
-        );
-        updSP(ang,Math.max(mag,200));player.special(ang);
+        let ang;
+        if(mag>18){
+          ang=Math.atan2(dy,dx);updSP(ang,mag);
+        }else{
+          // タップ → 最近敵に向けて発動
+          const near=foes(player).filter(f=>!f.dead).reduce((a,b)=>!a||dst(player,b)<dst(player,a)?b:a,null);
+          ang=near?Math.atan2(near.y-player.y,near.x-player.x):0;
+          if(near)updSP(ang,400);
+        }
+        player.special(ang);
       }
       stk.sp.a=false;stk.sp.id=null;
     }
-    // Move stick release
     if(stk.mv.id===t.identifier){stk.mv.a=false;stk.mv.id=null;}
   }
 },{passive:false});
@@ -1043,8 +1377,13 @@ function startSoccer(T){
 function loop(){
   if(gState!=='play'&&gState!=='roundEnd'){requestAnimationFrame(loop);return;}
   FC++;ctx.clearRect(0,0,canvas.width,canvas.height);
+  // カメラ更新
+  const usaAiming=player&&!player.dead&&player.type==='usa'&&stk.sp.a&&player.spGauge>=player.spMax;
   if(gMode==='soccer'&&soccerBounds){const b=soccerBounds;cam.x=b.ox+b.fw/2;cam.y=b.oy+b.fh/2;}
-  else if(player&&!player.dead){cam.x+=(player.x-cam.x)*.1;cam.y+=(player.y-cam.y)*.1;}
+  else if(usaAiming){
+    // アメリカ特殊エイム中: カメラがspTargetに追従（プレイヤーは動けるが視点がエイム位置）
+    cam.x+=(spTarget.x-cam.x)*.12;cam.y+=(spTarget.y-cam.y)*.12;
+  }else if(player&&!player.dead){cam.x+=(player.x-cam.x)*.1;cam.y+=(player.y-cam.y)*.1;}
 
   ctx.save();ctx.translate(canvas.width/2-cam.x,canvas.height/2-cam.y);
 
@@ -1073,9 +1412,16 @@ function loop(){
 
   // Tiles
   tiles.forEach(t=>{
-    const colors={reclaim:['rgba(255,160,40,.2)','rgba(255,160,40,.35)'],flood:['rgba(30,100,210,.3)','rgba(80,160,255,.5)'],trench:['rgba(139,100,30,.3)','rgba(180,140,60,.5)']};
+    const colors={reclaim:['rgba(255,160,40,.2)','rgba(255,160,40,.35)'],flood:['rgba(30,100,210,.3)','rgba(80,160,255,.5)'],trench:['rgba(139,100,30,.35)','rgba(180,140,60,.6)']};
     const c=colors[t.type];if(!c)return;
-    ctx.fillStyle=c[0];ctx.fillRect(t.gx,t.gy,TILE,TILE);ctx.strokeStyle=c[1];ctx.lineWidth=1;ctx.strokeRect(t.gx,t.gy,TILE,TILE);
+    ctx.fillStyle=c[0];ctx.fillRect(t.gx,t.gy,TILE,TILE);
+    ctx.strokeStyle=c[1];ctx.lineWidth=1.5;ctx.strokeRect(t.gx,t.gy,TILE,TILE);
+    // 塹壕: HPバーを表示
+    if(t.type==='trench'&&isFinite(t.hp)&&t.maxHp){
+      const r=t.hp/t.maxHp;
+      ctx.fillStyle='rgba(0,0,0,.5)';ctx.fillRect(t.gx+2,t.gy+2,TILE-4,5);
+      ctx.fillStyle=r>.5?'#8B5E3C':'#c0392b';ctx.fillRect(t.gx+2,t.gy+2,(TILE-4)*r,5);
+    }
   });
   // Walls (Brawl Stars style)
   walls.forEach(w=>{
@@ -1149,8 +1495,34 @@ function loop(){
     }
     // SP aim (right side top)
     if(player.spGauge>=player.spMax){
-      if(T2==='canada'||T2==='luxembourg')drawThrowGuide(spTarget.x,spTarget.y,T2==='canada'?130:140,true);
-      else{ctx.save();ctx.globalAlpha=.25;ctx.fillStyle='#c4f';ctx.beginPath();ctx.arc(spTarget.x,spTarget.y,90,0,Math.PI*2);ctx.fill();ctx.restore();}
+      if(T2==='canada')drawThrowGuide(spTarget.x,spTarget.y,130,true);
+      else if(T2==='luxembourg')drawThrowGuide(spTarget.x,spTarget.y,140,true);
+      else if(T2==='usa'){
+        // USA: spTarget地点に爆撃マーカー（常時表示）+ stk.sp操作中のみ視点分離表示
+        ctx.save();
+        ctx.globalAlpha=.4+.2*Math.sin(FC*.3);
+        ctx.strokeStyle='#ff4444';ctx.lineWidth=3;ctx.setLineDash([8,4]);
+        ctx.beginPath();ctx.arc(spTarget.x,spTarget.y,260,0,Math.PI*2);ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha=.15;ctx.fillStyle='#ff4444';
+        ctx.beginPath();ctx.arc(spTarget.x,spTarget.y,260,0,Math.PI*2);ctx.fill();
+        // 十字照準
+        ctx.globalAlpha=.8;ctx.strokeStyle='#ff4444';ctx.lineWidth=2;
+        ctx.beginPath();ctx.moveTo(spTarget.x-30,spTarget.y);ctx.lineTo(spTarget.x+30,spTarget.y);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(spTarget.x,spTarget.y-30);ctx.lineTo(spTarget.x,spTarget.y+30);ctx.stroke();
+        // USA視点分離中: プレイヤー位置から視点位置へ線
+        if(stk.sp.a){
+          ctx.globalAlpha=.5;ctx.strokeStyle='rgba(255,100,100,.6)';ctx.lineWidth=1.5;ctx.setLineDash([5,5]);
+          ctx.beginPath();ctx.moveTo(player.x,player.y);ctx.lineTo(spTarget.x,spTarget.y);ctx.stroke();
+          ctx.setLineDash([]);
+          // プレイヤー位置に小さいマーカー
+          ctx.globalAlpha=.7;ctx.fillStyle='rgba(255,200,200,.8)';
+          ctx.beginPath();ctx.arc(player.x,player.y,player.sz+5,0,Math.PI*2);ctx.fill();
+        }
+        ctx.restore();
+      }else{
+        ctx.save();ctx.globalAlpha=.25;ctx.fillStyle='#c4f';ctx.beginPath();ctx.arc(spTarget.x,spTarget.y,90,0,Math.PI*2);ctx.fill();ctx.restore();
+      }
     }
   }
 
@@ -1166,11 +1538,19 @@ function loop(){
       if(keys['w']||keys['ArrowUp'])ay=-1;if(keys['s']||keys['ArrowDown'])ay=1;
       if(keys['a']||keys['ArrowLeft'])ax=-1;if(keys['d']||keys['ArrowRight'])ax=1;
       if(ax||ay){const l=Math.hypot(ax,ay);player.move(ax/l,ay/l);}
-      if(stk.mv.a){const dx=stk.mv.cx-stk.mv.bx,dy=stk.mv.cy-stk.mv.by;const l=Math.hypot(dx,dy);if(l>12)player.move(dx/l,dy/l);}
-      // Auto-fire burst chars while holding attack stick
-      if(stk.at.a&&FC%20===0){const dx=stk.at.cx-stk.at.bx,dy=stk.at.cy-stk.at.by;if(Math.hypot(dx,dy)>18&&['usa','germany'].includes(player.type)){player.atk(Math.atan2(dy,dx));}}
-      // SP target from super button drag (real-time aim preview)
-      if(stk.sp.a){const dx=stk.sp.cx-stk.sp.bx,dy=stk.sp.cy-stk.sp.by;if(Math.hypot(dx,dy)>12)updSP(Math.atan2(dy,dx),Math.hypot(dx,dy));}
+      // 移動スティック: デッドゾーン6px (BSに近い高感度)
+      if(stk.mv.a){
+        const dx=stk.mv.cx-stk.mv.bx,dy=stk.mv.cy-stk.mv.by;const l=Math.hypot(dx,dy);
+        if(l>6)player.move(dx/l,dy/l);
+      }
+      // 攻撃スティック押しっぱなし: バースト系は10fごとに自動発射
+      if(stk.at.a&&FC%10===0){
+        const dx=stk.at.cx-stk.at.bx,dy=stk.at.cy-stk.at.by;
+        if(Math.hypot(dx,dy)>18&&['usa','germany','finland'].includes(player.type)){
+          player.atk(Math.atan2(dy,dx));
+        }
+      }
+      if(stk.sp.a){const dx=stk.sp.cx-stk.sp.bx,dy=stk.sp.cy-stk.sp.by;if(Math.hypot(dx,dy)>8)updSP(Math.atan2(dy,dx),Math.hypot(dx,dy));}
     }
     const acts=gMode==='br'?allUnits:[player,...allies,...enemies,...sovietBots].filter(a=>a);
     acts.forEach(a=>a.update());
@@ -1178,11 +1558,38 @@ function loop(){
     ais.forEach(a=>a.aiUpdate());
     if(ball)ball.update();
     // Belgium effects
-    projectiles.forEach(p=>{if(p.bChoco){for(const f of foes(p.belOwner)){if(!f.dead&&dst2(p.x,p.y,f.x,f.y)<(f.sz+8)**2){f.poisonT=300;f.poisonDmg=350;p.active=false;return;}}for(const fr of frds(p.belOwner)){if(!fr.dead&&dst2(p.x,p.y,fr.x,fr.y)<(fr.sz+8)**2){fr.speedBoost=120;p.active=false;return;}}}else if(p.bWaffle)for(const fr of frds(p.belOwner)){if(!fr.dead&&dst2(p.x,p.y,fr.x,fr.y)<(fr.sz+9)**2){fr.shield=Math.min(fr.maxHp*.25,fr.shield+500);p.active=false;return;}}});
+    projectiles.forEach(p=>{
+      if(p.bChoco){
+        for(const f of foes(p.belOwner)){
+          if(!f.dead&&dst2(p.x,p.y,f.x,f.y)<(f.sz+8)**2){
+            // チョコ: 毒350/s×5秒
+            f.poisonT=300;f.poisonDmg=350;
+            p.active=false;return;
+          }
+        }
+        // 味方に当てたら移動速度上昇
+        for(const fr of frds(p.belOwner)){
+          if(!fr.dead&&dst2(p.x,p.y,fr.x,fr.y)<(fr.sz+8)**2){fr.speedBoost=120;p.active=false;return;}
+        }
+      }else if(p.bWaffle){
+        // 敵に当てたらダメージ（通常bullet処理で済み）
+        // 味方に当てたらシールド500付与（重複3回まで=最大1500）
+        for(const fr of frds(p.belOwner)){
+          if(!fr.dead&&dst2(p.x,p.y,fr.x,fr.y)<(fr.sz+9)**2){
+            fr.belShieldCount=(fr.belShieldCount||0);
+            if(fr.belShieldCount<3){
+              fr.shield=Math.min(fr.maxHp*.4,fr.shield+500);
+              fr.belShieldCount++;
+            }
+            p.active=false;return;
+          }
+        }
+      }
+    });
     projectiles.forEach(p=>p.update());projectiles=projectiles.filter(p=>p.active);
     areas.forEach(a=>a.update());areas=areas.filter(a=>a.active);
     items.forEach(it=>it.update());items=items.filter(it=>it.active);
-    tiles.forEach(t=>t.timer--);tiles=tiles.filter(t=>t.timer>0);
+    tiles.forEach(t=>t.timer--);tiles=tiles.filter(t=>t.timer>0&&(isFinite(t.hp)?t.hp>0:true));
     sovietBots=sovietBots.filter(b=>!b.dead);
     if(gMode==='territory'&&FC%30===0){const tz={x:W.w/2-160,y:W.h/2-160,w:320,h:320};const ina=a=>a&&!a.dead&&a.x>tz.x&&a.x<tz.x+tz.w&&a.y>tz.y&&a.y<tz.y+tz.h;const pa=[player,...allies].filter(ina).length,ea=enemies.filter(ina).length;if(pa>ea)terrGauge.p=Math.min(100,terrGauge.p+.5);else if(ea>pa)terrGauge.e=Math.min(100,terrGauge.e+.5);document.getElementById('sb').textContent=`陣地: 味方${terrGauge.p.toFixed(0)}% 敵${terrGauge.e.toFixed(0)}%`;checkEnd();}
     if(gMode==='crystal_defense'){const eU=enemies.filter(a=>!a.dead);eU.forEach(e=>{if(crystals.p&&dst(e,crystals.p)<e.sz+crystals.p.r+50&&e.atkCD<=0){crystals.p.takeDmg(400);e.atkCD=25;}});const pU=[player,...allies].filter(a=>a&&!a.dead);pU.forEach(u=>{if(crystals.e&&dst(u,crystals.e)<u.sz+crystals.e.r+50&&u.atkCD<=0){crystals.e.takeDmg(400);u.atkCD=25;}});}
