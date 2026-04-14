@@ -431,16 +431,23 @@ class Area{
           if(!f.dead&&dst(this,f)<this.radius+f.sz){
             f.takeDmg(this.dmg,this.owner,true);
             const a=Math.atan2(f.y-this.y,f.x-this.x);
-            const kx=f.x+Math.cos(a)*20,ky=f.y+Math.sin(a)*20;
-            if(wallColChar(kx,ky,f.sz))f.state={t:'stun',f:18};else{f.x=kx;f.y=ky;}
+            // 大きなノックバック(60px)
+            let kx=f.x+Math.cos(a)*60,ky=f.y+Math.sin(a)*60;
+            if(wallColChar(kx,ky,f.sz)){
+              kx=f.x+Math.cos(a)*20;ky=f.y+Math.sin(a)*20;
+              if(!wallColChar(kx,ky,f.sz)){f.x=kx;f.y=ky;}
+              f.state={t:'stun',f:18};
+            }else{f.x=kx;f.y=ky;}
           }
         });
       }
     }
-    // maple: 着地後の残存エリア。27fごと
+    // maple: 着地後3秒残存。27f(0.45秒)ごとに敵ダメ+スロー、60f(1秒)ごとに味方回復
     else if(T==='maple'){
       if(this.f%27===0){
         fo.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius+f.sz){f.takeDmg(this.dmg,this.owner);f.slowF=.5;f.slowT=60;}});
+      }
+      if(this.f%60===0){
         fr.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius+f.sz)f.hp=Math.min(f.maxHp,f.hp+750);});
       }
     }
@@ -462,9 +469,25 @@ class Area{
       if(this.f%60===0)fo.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius)f.takeDmg(this.dmg,this.owner,true);});
       fo.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius){f.slowF=.55;f.slowT=90;}});
     }
-    // wflag: 終了直前に味方転送
+    // wflag: 範囲内に居続けた味方は終了時に全回復+転送
     else if(T==='wflag'){
-      if(this.f>=this.dur-4)fr.forEach(f=>{if(!f.dead&&dst(this,f)<this.radius){f.hp=f.maxHp;f.x=f.team===TEAM.E?W.w-200:200;f.y=W.h/2;}});
+      // 毎フレーム: 範囲内にいる味方にフラグを立てる
+      if(!this.wflagStay)this.wflagStay=new Set();
+      fr.forEach(f=>{
+        if(!f.dead&&dst(this,f)<this.radius)this.wflagStay.add(f.id);
+        else this.wflagStay.delete(f.id);// 範囲外に出たら取り消し
+      });
+      // 終了瞬間: ずっといた味方を転送+全回復
+      if(this.f>=this.dur-2){
+        fr.forEach(f=>{
+          if(!f.dead&&this.wflagStay.has(f.id)){
+            f.hp=f.maxHp;
+            f.x=f.team===TEAM.E?W.w-200:200;
+            f.y=W.h/2;
+            f.spawnInv=60;// 転送後1秒無敵
+          }
+        });
+      }
     }
     // lux_land: 一度だけ（hs使用）、スタン付き
     else if(T==='lux_land'){
@@ -487,20 +510,28 @@ class Area{
     else if(T==='pizza'){ctx.translate(this.x,this.y);ctx.rotate(this.f*.32);ctx.strokeStyle='rgba(255,80,60,.9)';ctx.lineWidth=12;ctx.beginPath();ctx.arc(0,0,this.radius,0,Math.PI*2);ctx.stroke();}
     else if(T==='channel'){ctx.strokeStyle=`rgba(100,180,255,${pr*.75})`;ctx.lineWidth=20;ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.stroke();}
     else if(T==='wflag'){
-      // 範囲円（敵は攻撃力デバフ）
       ctx.strokeStyle=`rgba(255,255,255,${pr*.45})`;ctx.lineWidth=3;ctx.setLineDash([10,6]);
       ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);
       ctx.fillStyle=`rgba(30,60,200,${pr*.12})`;ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();
       // 白旗ポール
       ctx.strokeStyle=`rgba(200,200,200,${pr*.9})`;ctx.lineWidth=3;
       ctx.beginPath();ctx.moveTo(this.x,this.y+30);ctx.lineTo(this.x,this.y-40);ctx.stroke();
-      // 旗
       ctx.fillStyle=`rgba(255,255,255,${pr*.9})`;
       ctx.beginPath();ctx.moveTo(this.x,this.y-40);ctx.lineTo(this.x+28,this.y-28);ctx.lineTo(this.x,this.y-18);ctx.closePath();ctx.fill();
-      // 残り時間
       const sec2=(this.dur-this.f)/60;
       ctx.fillStyle=`rgba(255,255,200,${pr*.9})`;ctx.font=`bold 12px Arial`;ctx.textAlign='center';
       ctx.fillText(sec2.toFixed(1)+'s',this.x,this.y+45);
+      // 範囲内にいる味方に↑矢印（転送対象を明示）
+      if(this.wflagStay){
+        const allA=[player,...allies,...enemies].filter(a=>a&&!a.dead);
+        allA.forEach(f=>{
+          if(this.wflagStay.has(f.id)){
+            ctx.save();ctx.globalAlpha=.7+.3*Math.sin(FC*.2);ctx.fillStyle='#44ff88';
+            ctx.font='bold 16px Arial';ctx.textAlign='center';ctx.fillText('↑',f.x,f.y-f.sz-30);
+            ctx.restore();
+          }
+        });
+      }
     }
     else if(T==='maple'){ctx.fillStyle=`rgba(200,60,0,${pr*.4})`;ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();}
     else if(T==='syrup'){ctx.fillStyle=`rgba(180,100,10,${pr*.45})`;ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();}
@@ -648,7 +679,8 @@ class Actor{
   }
   move(ax,ay){
     if(this.dead)return;
-    if(this.state&&(this.state.t==='stun'||this.state.t==='jp_charge'))return;
+    // stun・jp_charge中は動けない。lux_jumpはstate管理側で位置更新するためmove()をスキップ
+    if(this.state&&(this.state.t==='stun'||this.state.t==='jp_charge'||this.state.t==='lux_jump'))return;
     const sp=this.effSpd;this.vx=ax*sp;this.vy=ay*sp;
     let nx=clamp(this.x+this.vx,this.sz+2,W.w-this.sz-2);
     let ny=clamp(this.y+this.vy,this.sz+2,W.h-this.sz-2);
@@ -724,7 +756,7 @@ class Actor{
     areas.push(new Area(this.x,this.y,'slash',this,165,2300,12,ang));this.atkCD=48;
   }
   gerAtk(ang){if(this.ammo<=0)return;for(let i=0;i<15;i++)setTimeout(()=>{if(!this.dead)projectiles.push(new FadeBullet(this.x,this.y,ang+(Math.random()-.5)*.6,13,600,250*this.atkMult,this,6,'#ffee66'));},i*35);this.ammo--;this.atkCD=110;}
-  tankAtk(ang){if(this.ammo<=0)return;projectiles.push(new ExpBullet(this.x,this.y,ang,8,850,2500*this.atkMult,this,160,'#ff8800'));this.ammo--;this.atkCD=90;this.tankHits++;this.addSP(500);}
+  tankAtk(ang){if(this.ammo<=0)return;projectiles.push(new ExpBullet(this.x,this.y,ang,5,950,2500*this.atkMult,this,160,'#ff8800'));this.ammo--;this.atkCD=90;this.tankHits++;this.addSP(500);}
   jpAtk(ang){
     if(this.atkPhase%2===0){
       // 1発目: チャージ突進
@@ -808,7 +840,7 @@ class Actor{
   spUSA(){areas.push(new Area(spTarget.x,spTarget.y,'strike_mk',this,260,0,120));setTimeout(()=>{for(let i=0;i<12;i++){const ox=(Math.random()-.5)*320,oy=(Math.random()-.5)*320;areas.push(new Area(spTarget.x+ox,spTarget.y+oy,'expl',this,140,5000,18));walls.forEach(w=>{if(w.brk&&w.active&&w.hp>0&&rcOv(w.x,w.y,w.w,w.h,spTarget.x+ox,spTarget.y+oy,140))w.hp-=2000;});}},2000);}
   spUK(){areas.push(new Area(this.x,this.y,'channel',this,200,850,300));this.spTimer=300;this.spTimerMax=300;}
   spFra(){areas.push(new Area(spTarget.x,spTarget.y,'wflag',this,260,0,480));}
-  spGer(){this.inTank=true;this.tankHp=this.hp*1.5;this.sz=64;this.spd=CD['germany'].spd*.8;this.tankHits=0;this.spTimer=900;this.spTimerMax=900;}
+  spGer(){this.inTank=true;this.tankHp=12000;this.tankMaxHp=12000;this.sz=64;this.spd=CD['germany'].spd*.8;this.tankHits=0;this.spTimer=900;this.spTimerMax=900;}
   spTank(){if(this.tankHits<2)return;areas.push(new Area(spTarget.x,spTarget.y,'strike_mk',this,220,0,120));setTimeout(()=>{for(let i=0;i<7;i++){const ox=(Math.random()-.5)*200,oy=(Math.random()-.5)*200;areas.push(new Area(spTarget.x+ox,spTarget.y+oy,'expl',this,150,4500,18));}},2000);this.tankHits=0;}
   spJP(){this.yamato=true;this.atkMult=1.5;this.spdMult=1.25;this.reloadMult=1.5;this.spTimer=360;this.spTimerMax=360;}
   spIta(){for(let i=0;i<4;i++)items.push(new HealItem(this.x+Math.cos(i*Math.PI/2)*175,this.y+Math.sin(i*Math.PI/2)*175,this.team,2000));}
@@ -856,10 +888,14 @@ class Actor{
         }
       }
       else if(s.t==='lux_jump'){
-        // Edgar飛翔: 弧を描いて着地、着地時爆発
+        // Edgar飛翔: 空中なので壁をすり抜ける
         s.f++;const prog=s.f/s.maxF;
+        // 壁判定なしで直線移動（空中）
         this.x=s.sx+(s.tx-s.sx)*prog;
         this.y=s.sy+(s.ty-s.sy)*prog;
+        // クランプだけ（マップ外に出ない）
+        this.x=clamp(this.x,this.sz+2,W.w-this.sz-2);
+        this.y=clamp(this.y,this.sz+2,W.h-this.sz-2);
         s.height=Math.sin(prog*Math.PI)*Math.min(150,Math.hypot(s.tx-s.sx,s.ty-s.sy)*.4);
         this._jumpHeight=s.height;
         if(s.f>=s.maxF){
@@ -1021,7 +1057,7 @@ class Actor{
     if(this.type==='belgium'){ctx.fillStyle='#ffcc00';ctx.font='7px Arial';ctx.textAlign='center';ctx.fillText('次:'+(this.nextBelShot==='choco'?'チョコ':'ワッフル'),this.x,spY+(this.spTimer>0?18:10));}
     // 戦車HP表示
     if(this.inTank&&this.tankHp>0){
-      const tankMax=CD['germany'].hp*1.5;const tr2=this.tankHp/tankMax;
+      const tankMax=this.tankMaxHp||12000;const tr2=this.tankHp/tankMax;
       ctx.fillStyle='rgba(0,0,0,.5)';roundRect(ctx,bx,spY+24,bw,5,2.5);ctx.fill();
       ctx.fillStyle='#aaaaaa';roundRect(ctx,bx,spY+24,bw*tr2,5,2.5);ctx.fill();
       ctx.fillStyle='#ccc';ctx.font='7px Arial';ctx.textAlign='center';ctx.fillText(`戦車 ${Math.ceil(this.tankHp)}`,this.x,spY+34);
